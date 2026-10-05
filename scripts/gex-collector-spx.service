@@ -1,0 +1,30 @@
+[Unit]
+Description=CBOE options-chain collector, SPX (gex_tool, schema v4)
+Documentation=file:///home/ubuntu/gex_tool/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gex_tool
+# Same cadence and backoff as gex-collector.service (SPY), which keeps
+# running in parallel until SPX has enough history; together that is two
+# CBOE requests a minute in session. `_SPX` is CBOE's index symbol; the store
+# writes it under symbol=SPX. Own log file, so the two collectors' lines and
+# stall alerts cannot be confused.
+# --raw-every-poll-until: the schema-v4 transition window -- every response's
+# exact body is kept under raw_polls/ (~0.74 GB/session) through the first
+# AM-settlement Friday (2026-10-16) plus a week to verify it and replay from
+# raw. Extend the date (and restart) if that check has not been done.
+ExecStart=/home/ubuntu/gex_tool/.venv/bin/python3 -m gex.collector \
+    --symbol _SPX --root /home/ubuntu/gex_data \
+    --interval 60 --idle-interval 900 \
+    --raw-every-poll-until 2026-10-23
+Restart=always
+RestartSec=30
+StandardOutput=append:/home/ubuntu/gex_data/collector_spx.log
+StandardError=append:/home/ubuntu/gex_data/collector_spx.log
+
+[Install]
+WantedBy=multi-user.target

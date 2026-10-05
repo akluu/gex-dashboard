@@ -1,0 +1,7 @@
+# Collected market data is never committed (see README: Data and terms).
+data/
+*.parquet
+*.json.gz
+__pycache__/
+.venv/
+.DS_Store

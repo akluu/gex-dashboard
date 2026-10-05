@@ -1,0 +1,23 @@
+[Unit]
+Description=CBOE options-chain collector (gex_tool)
+Documentation=file:///home/ubuntu/gex_tool/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gex_tool
+# --interval 60 during RTH, --idle-interval 900 outside it. Cboe's terms
+# prohibit auto-extraction, so poll conservatively and never tight-loop:
+# the collector also backs off exponentially on a failure streak.
+ExecStart=/home/ubuntu/gex_tool/.venv/bin/python3 -m gex.collector \
+    --symbol SPY --root /home/ubuntu/gex_data \
+    --interval 60 --idle-interval 900
+Restart=always
+RestartSec=30
+StandardOutput=append:/home/ubuntu/gex_data/collector.log
+StandardError=append:/home/ubuntu/gex_data/collector.log
+
+[Install]
+WantedBy=multi-user.target

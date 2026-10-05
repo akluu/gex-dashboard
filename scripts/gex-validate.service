@@ -1,0 +1,18 @@
+[Unit]
+Description=GEX daily accuracy report (OI vs OCC, greek consistency, arithmetic)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gex_tool
+# Reads only stored files plus ONE request to OCC's series search (never
+# CBOE). Writes ~/gex_data/validation/date=YYYY-MM-DD.json every run --
+# skipped and error included -- so a stale pass can never stand in for today.
+ExecStart=/home/ubuntu/gex_tool/.venv/bin/python3 -m gex.validate \
+    --root /home/ubuntu/gex_data --symbol SPY
+TimeoutStartSec=300
+Nice=10
+StandardOutput=append:/home/ubuntu/gex_data/validation.log
+StandardError=append:/home/ubuntu/gex_data/validation.log

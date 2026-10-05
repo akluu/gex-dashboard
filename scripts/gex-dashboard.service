@@ -1,0 +1,27 @@
+[Unit]
+Description=GEX dashboard (SPY) - loopback only, reads the collector's store
+After=network-online.target gex-collector.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gex_tool
+# BINDS 127.0.0.1 ONLY and the code refuses anything else. Cboe's terms forbid
+# redistributing their delayed data externally, so this is reached over an SSH
+# tunnel (LocalForward 8788 in ~/.ssh/config), never exposed.
+# Since 2026-09-29 it NEVER contacts CBOE: it only reads what gex-collector
+# stored under --data-root, so it adds nothing to the request rate.
+# Both symbols in one process (?symbol=SPX on the page); the FIRST is the
+# default, so the plain URL keeps showing SPY. An empty symbol=SPX store
+# (before the SPX collector's first poll) is shown as "nothing stored yet".
+ExecStart=/home/ubuntu/gex_tool/.venv/bin/python3 -m gex.server \
+    --symbol SPY --symbol SPX --port 8788 --bind 127.0.0.1 --check-every 5 \
+    --data-root /home/ubuntu/gex_data
+Restart=always
+RestartSec=15
+StandardOutput=append:/home/ubuntu/gex_data/dashboard.log
+StandardError=append:/home/ubuntu/gex_data/dashboard.log
+
+[Install]
+WantedBy=multi-user.target

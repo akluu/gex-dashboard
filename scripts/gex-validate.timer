@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the GEX accuracy report at noon New York time on weekdays
+
+[Timer]
+# Noon ET: after the ~09:46 ET stale-to-live handover, and the same ET day as
+# OCC's file (whose OI reflects the previous close; its update time is not
+# published). Holidays are handled inside (written as "skipped").
+OnCalendar=Mon..Fri 12:00 America/New_York
+# Deliberately NOT Persistent=true: a catch-up run on a later day would find
+# OCC's undated file already on the next day; validate.py refuses that
+# comparison anyway, but a missed day is better recorded as missing.
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

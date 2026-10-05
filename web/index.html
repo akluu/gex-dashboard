@@ -1,0 +1,2003 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>GEX</title>
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --dim:#8b949e;
+          --call:#3fb950; --put:#f85149; --line:#30363d; --warn:#d29922;
+          --spot:#58a6ff; --grid:#21262d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  header { display:flex; gap:20px; align-items:baseline; flex-wrap:wrap;
+           padding:10px 14px; border-bottom:1px solid var(--line); }
+  h1 { font-size:14px; margin:0; font-weight:600; }
+  .stat b { font-size:15px; }
+  .dim { color:var(--dim); }
+  #feed { margin-left:auto; text-align:right; font-size:11px; color:var(--dim); }
+  .warn { color:var(--warn); }
+  main { padding:12px 14px; display:grid; gap:14px;
+         grid-template-columns: minmax(340px, 1fr) minmax(340px, 1fr); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px;
+           position:relative; }
+  .panel h2 { font-size:11px; margin:0; padding:7px 10px; color:var(--dim);
+              border-bottom:1px solid var(--line); font-weight:600;
+              text-transform:uppercase; letter-spacing:.06em; }
+  .wide { grid-column:1 / -1; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  canvas { display:block; width:100%; cursor:crosshair; }
+  /* Vertical profiles are tall: strikes run down the Y axis like a price chart. */
+  #gexcv, #dexcv { height:620px; }
+  #oicv, #volcv { height:520px; }
+  #trendcv { height:220px; }
+  #smilecv { height:360px; }
+  .banner { margin:8px 14px 0; padding:6px 10px; border:1px solid #9e6a03; border-radius:6px;
+            background:#2d2206; color:#e3b341; font-size:12px; }
+  .oirow { display:grid; grid-template-columns: minmax(300px, 1fr) minmax(340px, 1.5fr); }
+  .oicell { position:relative; }
+  #wallcv, #oihistcv { height:460px; }
+  #trackcv { height:440px; }
+  #termcv { height:400px; }
+  #heatcv { height:480px; }
+  @media (max-width: 800px) { .oirow { grid-template-columns: 1fr; } }
+  .note { padding:4px 10px 8px; font-size:11px; color:var(--dim); }
+  /* Methodology and how-to-read text sits in .ex, hidden until the header's
+     "explanations" button is on. Figures and .warn text are never inside .ex. */
+  body:not(.explain) .ex { display:none !important; }
+  div.ex { margin-top:4px; }
+  .howto { color:var(--ink); }
+  button.exp { border-left:3px solid transparent; }
+  .controls { display:flex; gap:6px; padding:8px 10px; flex-wrap:wrap; }
+  select { background:#21262d; color:var(--ink); border:1px solid var(--line);
+           border-radius:5px; padding:2px 6px; font:inherit; font-size:11px; }
+  button { background:#21262d; color:var(--ink); border:1px solid var(--line);
+           border-radius:5px; padding:3px 9px; cursor:pointer; font:inherit; font-size:11px; }
+  button.on { background:#1f6feb; border-color:#1f6feb; }
+  .health { display:grid; grid-template-columns: 1fr 1fr; gap:4px 24px; padding:8px 10px;
+            font-size:12px; }
+  .health h3 { font-size:11px; margin:2px 0 4px; color:var(--dim); font-weight:600;
+               text-transform:uppercase; letter-spacing:.05em; }
+  .health .row { display:flex; gap:8px; }
+  .health .k { color:var(--dim); min-width:170px; }
+  .badge { padding:0 6px; border-radius:4px; font-size:11px; font-weight:600; }
+  .b-ok { background:#1a7f37; } .b-bad { background:#b62324; }
+  .b-mid { background:#9e6a03; } .b-off { background:#30363d; }
+  @media (max-width: 800px) { .health { grid-template-columns: 1fr; } }
+  .tip { position:absolute; pointer-events:none; background:#0d1117f2;
+         border:1px solid var(--line); border-radius:4px; padding:5px 8px;
+         font-size:11px; white-space:pre; display:none; z-index:5; }
+</style>
+
+<header>
+  <h1>GEX · <span id="symname">…</span></h1>
+  <div class="stat" id="symsel" title="which underlying this page shows; each has its own collector and store"></div>
+  <div class="stat">spot <b id="spot">—</b> <span class="warn" id="spottag"></span></div>
+  <div class="stat dim" title="The three figures to the right cover ALL expiries and all strikes; the bucket chips below do not change them">all expiries:</div>
+  <div class="stat">net GEX <b id="gex">—</b> <span class="dim" id="gexunit"></span> <span class="dim" id="gexgross"></span></div>
+  <div class="stat" title="GEX ratio (GEXStream's definition): calls netted against puts at each strike, then positive strike nets ÷ |strike nets|. 0.5 = zero net gamma, 1 = every strike net positive, 0 = every strike net negative. Signs assume calls +, puts − (dealer positioning is not observable).">GEX ratio <b id="gexratio">—</b></div>
+  <div class="stat" title="Net delta of ALL open contracts, as if held long (GEXStream's definition: positive where call delta outweighs put delta). Not dealer delta: unlike GEX, no dealer sign is applied.">net DEX <b id="dex">—</b> <span class="dim" id="dexunit"></span></div>
+  <label class="stat dim">units <select id="unitsel" title="units for GEX and DEX everywhere on this page"></select></label>
+  <div class="stat dim" id="clock">—</div>
+  <label class="stat dim">times in <select id="tzsel" title="time zone for every time shown on this page"></select></label>
+  <button class="stat" id="explainbtn" title="show or hide the how-to-read lines and methodology notes under each chart; figures and warnings always show"></button>
+  <div id="feed">connecting…</div>
+</header>
+<div class="banner" id="postclose" hidden></div>
+<div class="controls" id="buckets"></div>
+<main>
+  <div class="panel wide">
+    <h2>Feed health &amp; accuracy<span class="ex"> — how far to trust what's below</span></h2>
+    <div class="health" id="health">loading…</div>
+  </div>
+  <div class="panel">
+    <h2 id="gextitle">Gamma exposure by strike</h2>
+    <div class="controls" id="gexmodectl"></div>
+    <canvas id="gexcv"></canvas><div class="tip" id="gextip"></div>
+    <div class="note" id="gexnote"></div>
+  </div>
+  <div class="panel">
+    <h2>Delta exposure by strike</h2>
+    <canvas id="dexcv"></canvas><div class="tip" id="dextip"></div>
+    <div class="note" id="dexnote"></div>
+  </div>
+  <div class="panel">
+    <h2>Open interest by strike<span class="ex"> — open contracts, calls right, puts left</span></h2>
+    <canvas id="oicv"></canvas><div class="tip" id="oitip"></div>
+    <div class="note" id="oinote"></div>
+  </div>
+  <div class="panel">
+    <h2>Volume by strike<span class="ex"> — cumulative since the open, calls right, puts left</span></h2>
+    <canvas id="volcv"></canvas><div class="tip" id="voltip"></div>
+    <div class="note" id="volnote"></div>
+  </div>
+  <div class="panel wide">
+    <h2>Front-expiry open interest (OI walls)<span class="ex"> — calls + puts per strike, GEXStream's definition · by session</span></h2>
+    <div class="oirow">
+      <div class="oicell"><canvas id="wallcv"></canvas><div class="tip" id="walltip"></div></div>
+      <div class="oicell"><canvas id="oihistcv"></canvas><div class="tip" id="oihisttip"></div></div>
+    </div>
+    <div class="note" id="oiwallnote">loading…</div>
+  </div>
+  <div class="panel wide">
+    <h2>Intraday net GEX · all expiries<span class="ex"> (the bucket chips do not apply), from stored snapshots, not a re-poll</span></h2>
+    <canvas id="trendcv"></canvas><div class="tip" id="trendtip"></div>
+    <div class="note ex"><span class="howto">How to read: net GEX through the session. Stored open interest normally stays unchanged intraday, so changes in this line mainly reflect revaluation as spot, time and IV move — not measured position changes.</span></div>
+  </div>
+  <div class="panel wide">
+    <h2>Intraday gamma tracks · all expiries<span class="ex"> (the bucket chips do not apply), from stored snapshots</span></h2>
+    <canvas id="trackcv"></canvas><div class="tip" id="tracktip"></div>
+    <div class="note" id="tracknote">loading…</div>
+  </div>
+  <div class="panel wide">
+    <h2>Intraday GEX heatmap · all expiries<span class="ex"> (the bucket chips do not apply), from stored snapshots</span></h2>
+    <div class="controls" id="heatctl"></div>
+    <canvas id="heatcv"></canvas><div class="tip" id="heattip"></div>
+    <div class="note" id="heatnote">loading…</div>
+  </div>
+  <div class="panel wide">
+    <h2>IV smile<span class="ex"> — CBOE-reported model IV, delayed · OTM side: puts below spot, calls above</span></h2>
+    <div class="controls" id="smilectl"></div>
+    <canvas id="smilecv"></canvas><div class="tip" id="smiletip"></div>
+    <div class="note" id="smilenote"></div>
+  </div>
+  <div class="panel wide">
+    <h2>IV term structure · 25Δ skew below<span class="ex"> — CBOE model IV at fixed deltas, delayed</span></h2>
+    <canvas id="termcv"></canvas><div class="tip" id="termtip"></div>
+    <div class="note" id="termnote">loading…</div>
+  </div>
+</main>
+
+<script src="gexmath.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+// ---- symbol (one page per underlying; ?symbol=SPX) ---------------------------
+// Every request goes through api() so a page never mixes two symbols' data;
+// switching symbols RELOADS the page rather than resetting each loader's state.
+const SYMBOL = (new URLSearchParams(location.search).get("symbol") || "").replace(/^_/, "").toUpperCase() || null;
+const api = path => SYMBOL ? `${path}${path.includes("?") ? "&" : "?"}symbol=${encodeURIComponent(SYMBOL)}` : path;
+let symShown = SYMBOL;                    // filled from /api/symbols when the URL has none
+(async function initSymbols() {
+  try {
+    const r = await fetch("/api/symbols");
+    const d = await r.json();
+    symShown = SYMBOL || d.default;
+    $("symname").textContent = symShown; document.title = `GEX — ${symShown}`;
+    const el = $("symsel"); el.innerHTML = "";
+    for (const sym of d.symbols) {
+      const b = document.createElement("button");
+      b.textContent = sym; b.className = sym === symShown ? "on" : "";
+      b.onclick = () => { if (sym === symShown) return;
+        const u = new URL(location.href); u.searchParams.set("symbol", sym); location.href = u.toString(); };
+      el.appendChild(b);
+    }
+  } catch (e) { $("symname").textContent = SYMBOL || "?"; }
+})();
+const BUCKETS = ["0DTE","1D","2-7D","8-30D","30D+"];
+let active = new Set(BUCKETS), latest = null, history = [];
+
+BUCKETS.forEach(b => {
+  const el = document.createElement("button");
+  el.textContent = b; el.className = "on";
+  el.onclick = () => { active.has(b) ? active.delete(b) : active.add(b);
+                       el.classList.toggle("on"); drawAll(); };
+  $("buckets").appendChild(el);
+});
+
+// GEX/DEX units, chosen in the header: our dollars, or the raw gamma / delta
+// shares GEXStream publishes (see web/gexmath.js). Remembered per browser as
+// a convenience only, like the time zone.
+const UNIT_CHOICES = [["usd", "$ (per 1% move · $ delta)"], ["raw", "raw gamma / delta shares"]];
+let units = "usd";
+try { const saved = localStorage.getItem("gex.units");
+      if (saved && UNIT_CHOICES.some(c => c[0] === saved)) units = saved; } catch (e) {}
+
+// Explanations (header button): how-to-read lines and methodology go in an
+// .ex block, hidden while off (the default). Figures and .warn text must stay
+// OUTSIDE ex() so they show in both states. Remembered per browser only.
+let explain = false;
+try { explain = localStorage.getItem("gex.explain") === "1"; } catch (e) {}
+const ex = html => `<div class="ex">${html}</div>`;
+const howto = txt => `<span class="howto">How to read: ${txt}</span><br>`;
+
+// DISPLAY-ONLY timezone conversion. Everything stored stays UTC -- logs and
+// Parquet keep ISO-8601 UTC so the archive is unambiguous, sortable and
+// DST-free. Only what a human reads is localised.
+// America/Los_Angeles, NOT a fixed -08:00: a hardcoded "PST" is correct in
+// winter and an hour wrong all summer, which is exactly the bug that shifted
+// the collector's whole session gate before it was fixed with zoneinfo.
+// Display zone is selectable (header menu); Pacific stays the default. The
+// choice is remembered per browser, as a convenience only -- the page works
+// the same if storage is unavailable. Market-date logic (todayET, session
+// dates) stays in New York time regardless: it is not a display choice.
+const TZ_CHOICES = [["America/Los_Angeles", "Pacific"], ["America/Denver", "Mountain"],
+                    ["America/Chicago", "Central"], ["America/New_York", "Eastern"],
+                    ["UTC", "UTC"], ["local", "This computer"]];
+const LOCAL_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; }
+                          catch (e) { return "UTC"; } })();
+let displayTZ = "America/Los_Angeles";
+try { const saved = localStorage.getItem("gex.tz");
+      if (saved && TZ_CHOICES.some(c => c[0] === saved)) displayTZ = saved; } catch (e) {}
+const tzId = () => displayTZ === "local" ? LOCAL_TZ : displayTZ;
+const tzTime = iso => {
+  if (!iso) return "—";
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+  return isNaN(d) ? "—" : d.toLocaleTimeString("en-GB",
+    {timeZone: tzId(), hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit"});
+};
+const tzLabel = () => new Intl.DateTimeFormat("en-US",
+  {timeZone: tzId(), timeZoneName: "short"}).formatToParts(new Date())
+  .find(p => p.type === "timeZoneName").value;   // "PDT" or "PST", correctly
+
+// Feed-line helpers. Every stamp carries its own DATE and its own PDT/PST
+// label (taken from that stamp's date, not today's), because the page can
+// be showing a previous session: before the open, on weekends, on holidays.
+const ET = "America/New_York";
+const toDate = iso => {
+  if (!iso) return null;
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+  return isNaN(d) ? null : d;
+};
+const tzAt = d => new Intl.DateTimeFormat("en-US", {timeZone: tzId(), timeZoneName: "short"})
+  .formatToParts(d).find(p => p.type === "timeZoneName").value;
+const tzStamp = iso => {
+  const d = toDate(iso); if (!d) return "—";
+  return d.toLocaleString("en-US", {timeZone: tzId(), weekday: "short", month: "2-digit",
+    day: "2-digit", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit"})
+    + " " + tzAt(d);
+};
+// Ages are computed HERE, every second. The server pushes once per stored
+// poll, so an age computed at push time would freeze whenever collection
+// pauses -- all evening, all weekend -- and read as fresh.
+const ageOf = iso => {
+  const d = toDate(iso); if (!d) return "—";
+  const s = Math.max(0, (Date.now() - d) / 1000);
+  return s < 120 ? Math.round(s) + "s" : s < 7200 ? Math.round(s / 60) + " min"
+       : s < 172800 ? (s / 3600).toFixed(1) + " h" : (s / 86400).toFixed(1) + " days";
+};
+const todayET = () => new Date().toLocaleDateString("en-CA", {timeZone: ET});
+let streamDown = false;
+
+// ---- feed health & accuracy -------------------------------------------------
+// Claims kept deliberately narrow: "saved" counts
+// SAVED snapshots (unchanged CBOE responses are not saved); the accuracy
+// report certifies the one snapshot it checked, not later ones; the dealer-
+// positioning sign is an assumption nobody can verify from public data.
+let status = null, statusAt = 0, statusSeq = 0, statusApplied = 0, statusErr = null;
+async function loadStatus() {
+  const seq = ++statusSeq;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 10000);
+  try {
+    const r = await fetch(api("/api/status"), {signal: ctl.signal});
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const s = await r.json();
+    if (seq > statusApplied) { status = s; statusApplied = seq; statusAt = Date.now(); statusErr = null; }
+  } catch (e) { statusErr = e.name === "AbortError" ? "timed out" : String(e.message || e); }
+  finally {
+    clearTimeout(timer); renderHealth();
+    // A configured symbol with nothing stored yet (SPX between its deploy and
+    // its first poll) says so, instead of "connecting..." forever.
+    if (storeEmpty()) {
+      $("feed").innerHTML = `<span class="warn">no ${status.symbol || symShown || ""} snapshots stored yet — ` +
+        `the collector saves its first one after the next session opens</span>`;
+      drawEmpty();                // every panel says so too, instead of "loading…"
+    }
+  }
+}
+const statusFresh = () => status && Date.now() - statusAt < 90e3;
+// What an empty panel says: a configured symbol with NOTHING stored yet (SPX
+// before its first poll) is not "loading" -- nothing is on its way.
+const storeEmpty = () => !latest && !!status && !status.last_stored_at;
+const waiting = () => storeEmpty() ? "no snapshots stored yet" : "loading…";
+const badge = (txt, cls) => `<span class="badge ${cls}">${txt}</span>`;
+const row = (k, v) => `<div class="row"><span class="k">${k}</span><span>${v}</span></div>`;
+const pct = (x, d = 1) => x == null ? "—" : (x * 100).toFixed(d) + "%";
+const etDateOf = s => s ? String(s).slice(0, 10) : null;   // CBOE stamps are naive ET
+
+// Judged on the snapshot ON SCREEN (its own receipt and trade times), not on
+// the collector's latest save: a frozen page must not look healthy while the
+// collector keeps saving.
+function dataState() {
+  const v = latest; if (!v) return ["NO DATA", "b-off"];
+  const f = v.feed || {};
+  if (streamDown) return ["DISCONNECTED — showing the last snapshot received", "b-bad"];
+  if (!statusFresh()) return ["STATUS UNAVAILABLE — can't judge freshness", "b-mid"];
+  const today = status.today_et;
+  const shownAt = toDate(f.received_at), trade = toDate(f.newest_trade_utc);
+  if (!shownAt || !trade) return ["UNKNOWN — snapshot lacks a receipt or trade time", "b-mid"];
+  const shownMin = (Date.now() - shownAt) / 60e3, tradeMin = (Date.now() - trade) / 60e3;
+  if (status.collecting && shownMin > 5)
+    return [`STALLED — snapshot on screen is ${Math.round(shownMin)} min old`, "b-bad"];
+  if (v.session_date !== today) return ["LAST SESSION (not today)", "b-off"];
+  if (etDateOf(f.newest_trade_time) < today)
+    return ["MIXED-AGE — previous session's greeks, today's spot", "b-mid"];
+  if (status.market && !status.market.open)
+    return [`TODAY — session over; last snapshot (newest trade ${Math.round(tradeMin)} min old)`, "b-off"];
+  if (status.market && status.market.open && tradeMin > 30)
+    return [`TODAY — but newest trade is ${Math.round(tradeMin)} min old`, "b-mid"];
+  return [`TODAY — DELAYED (newest trade ${Math.round(tradeMin)} min old)`, "b-ok"];
+}
+
+function renderHealth() {
+  if (!status) {
+    if (statusErr) $("health").innerHTML = `<span class="warn">status unavailable: ${statusErr}</span>`;
+    return;
+  }
+  const f = (latest && latest.feed) || {};
+  const [st, cls] = dataState();
+  const m = status.market || {};
+  const sAge = Math.round((Date.now() - statusAt) / 1000);
+  let left = `<div><h3>Feed</h3>` +
+    (statusFresh() ? "" : row("status", `<span class="warn">stale (${sAge}s old${statusErr ? ", " + statusErr : ""}) — figures below may be out of date</span>`)) +
+    row("market (regular session)", m.open ? badge("OPEN", "b-ok") : badge("CLOSED", "b-off") + ` <span class="dim">${m.reason || ""}</span>`) +
+    row("data on screen", badge(st, cls)) +
+    row("newest trade", `${tzStamp(f.newest_trade_utc)} (${ageOf(f.newest_trade_utc)} ago)`) +
+    row("snapshot on screen saved", `${tzStamp(f.received_at)} (${ageOf(f.received_at)} ago)`) +
+    row("collector's latest save", `${tzStamp(status.last_stored_at)} (${ageOf(status.last_stored_at)} ago)`) +
+    row("saved in last 10 min", `${status.stored_last_10min} <span class="dim ex">(unchanged responses aren't saved)</span>`) +
+    row("fetch time (shown snapshot)", f.fetch_seconds == null ? "—" : f.fetch_seconds.toFixed(2) + " s") +
+    `</div>`;
+  const V = status.validation;
+  let right = `<div><h3>Accuracy — last daily report (12:00 ET)</h3>`;
+  if (!V && status.validation_note) {
+    right += row("report", badge("NOT VALIDATED", "b-mid") + ` <span class="warn">${status.validation_note}</span>`);
+  } else if (!V) {
+    right += row("report", badge("NONE YET", "b-off"));
+  } else {
+    const map = {pass: "b-ok", investigate: "b-bad", error: "b-bad", incomplete: "b-mid",
+                 skipped: "b-off", unreadable: "b-bad"};
+    const stale = V.date !== status.today_et;
+    right += row("report", badge((V.status || "?").toUpperCase(), map[V.status] || "b-off") +
+      ` ${V.date}` + (stale ? ` <span class="warn">— not today's</span>` : "") +
+      (V.reason ? ` <span class="dim">${V.reason}</span>` : "") +
+      (V.error ? ` <span class="warn">${V.error}</span>` : ""));
+    if (V.n_unreadable_polls) right += row("unreadable snapshots",
+      `${badge(String(V.n_unreadable_polls), "b-bad")} <span class="dim">that day, skipped over by the report</span>`);
+    if (V.n_prev_unreadable_polls) right += row("unreadable (previous session)",
+      `${badge(String(V.n_prev_unreadable_polls), "b-bad")} <span class="dim">new-listing evidence not trusted, so no pass</span>`);
+    if (V.poll) right += row("snapshot checked",
+      `${tzStamp(V.poll.received_at)} <span class="dim">(does not certify later snapshots)</span>`);
+    const o = V.occ || {}, g = V.greeks || {}, a = V.arithmetic || {};
+    if (o.status) right += row("open interest vs OCC",
+      o.status === "match" ? `${badge("MATCH", "b-ok")} ${o.sides_equal}/${o.sides_compared} contract sides exact, ${o.n_unexplained} unexplained gaps`
+      : `${badge(o.status.toUpperCase(), o.status === "not_run" ? "b-mid" : "b-bad")} ${o.reason || o.error || (o.n_unexplained + " unexplained")}`);
+    if (g.status) right += row("greeks vs own IV (OTM-cohort consistency)",
+      g.status === "consistent"
+        ? `${badge("CONSISTENT", "b-ok")} gamma error median ${pct(g.gamma_median, 2)} / p95 ${pct(g.gamma_p95)}, delta error p95 ${g.delta_p95 == null ? "—" : g.delta_p95.toFixed(3)}, on ${g.n} OTM 7–60 DTE contracts <span class="dim">(${pct(g.gross_gamma_coverage, 0)} of gross gamma; 0–6 DTE in the diagnostic below; ITM and &gt;60 DTE not checked)</span>`
+        : `${badge(g.status.toUpperCase(), "b-bad")} ${(g.flags || []).join("; ") || g.error || ""}`);
+    // Report-only diagnostic (audit F12): never part of the PASS badge above.
+    const sd = V.short_dated;
+    if (sd) right += row("short-dated greeks, 0–6 DTE (diagnostic — not in PASS)",
+      !sd.cohorts || !Object.keys(sd.cohorts).length
+        ? `${badge((sd.status || "error").toUpperCase().replace("_", " "), sd.status === "error" ? "b-bad" : "b-mid")} ${sd.error || ""}`
+      : `${badge(sd.status.toUpperCase(), sd.status === "consistent" ? "b-ok" : sd.status === "investigate" ? "b-bad" : "b-mid")} ` +
+        Object.entries(sd.cohorts).map(([lab, c]) => c.status === "insufficient" ? `${lab}: too few contracts (${c.n})`
+          : c.status === "none listed" ? `${lab}: none listed`
+          : `${lab}: gamma error ${pct(c.gamma_16_15, 1)} (options-close maturity) / ${pct(c.gamma_16_00, 1)} (equity-close)` +
+            (c.effective_hours != null ? `, effective time ${c.effective_hours.toFixed(1)} h vs ${c.hours_to_16_15.toFixed(1)} h left` : `, time ×${c.multiplier.toFixed(2)}`) +
+            ` <span class="dim">(n ${c.n}, ${pct(c.coverage, 0)} of its gamma)</span>`).join(" · ") +
+        ((sd.flags || []).length ? ` <span class="warn">${sd.flags.join("; ")}</span>` : ""));
+    else if (V.date) right += row("short-dated greeks, 0–6 DTE (diagnostic)", `<span class="dim">not in this report (added 2026-09-30; first run at the next 12:00 ET report)</span>`);
+    if (a.status) right += row("totals recomputed",
+      `${badge(a.status === "reconciled" ? "RECONCILED" : a.status.toUpperCase(), a.status === "reconciled" ? "b-ok" : "b-bad")}` +
+      (a.net_over_gross != null ? ` <span class="dim ex">net is ${pct(Math.abs(a.net_over_gross), 0)} of gross — the smaller, the more fragile the net number</span>` : ""));
+    const so = V.stale_open && V.stale_open.first_observed_today_trade_snapshot;
+    if (so) right += row("first live snapshot that day",
+      `${tzStamp(so.received_at)} <span class="dim">(${V.stale_open.stored_before_first_today_trade} mixed-age before it)</span>`);
+  }
+  right += row("dealer sign (GEX only: calls +, puts −)", `<span class="warn">assumption — not verifiable from public data; DEX applies no dealer sign</span>`);
+  right += `</div>`;
+  $("health").innerHTML = left + right;
+}
+
+function rollup(rows) {
+  const m = new Map();
+  for (const r of rows) {
+    if (!active.has(r.bucket)) continue;
+    let o = m.get(r.strike);
+    if (!o) { o = {strike:r.strike, cg:0, pg:0, cd:0, pd:0, co:0, po:0, cv:0, pv:0}; m.set(r.strike, o); }
+    o.cg += r.call_gamma_oi; o.pg += r.put_gamma_oi;
+    o.cd += r.call_delta_oi; o.pd += r.put_delta_oi;
+    // Contract counts. Summed as stored; the collector stores a missing
+    // volume as 0, so a zero cannot certify "no trading".
+    o.co += r.call_oi || 0; o.po += r.put_oi || 0;
+    o.cv += r.call_volume || 0; o.pv += r.put_volume || 0;
+  }
+  return [...m.values()].sort((a,b) => a.strike - b.strike);
+}
+
+function fit(cv) {
+  const dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W*dpr; cv.height = H*dpr;
+  const g = cv.getContext("2d"); g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,W,H); return {g,W,H};
+}
+
+// VERTICAL profile: strike on the Y axis (high at top, like a price chart),
+// exposure extending horizontally from a zero line. This is the conventional
+// GEX layout precisely because it lines up with price.
+function profile(cv, data, pick, spot, opts = {}) {
+  // opts.factor: raw value -> displayed unit; opts.fmt: axis label; opts.net:
+  // pick() returns ONE signed value per strike (drawn green right / red left)
+  // instead of [calls, puts]; opts.unit: axis caption.
+  const {g,W,H} = fit(cv);
+  const PAD = {t:10,b:32,l:52,r:10};
+  if (!data.length || !spot) return null;
+  const lo = spot*0.88, hi = spot*1.12;
+  const vis = data.filter(d => d.strike >= lo && d.strike <= hi);
+  if (!vis.length) return null;
+  const vals = d => opts.net ? [pick(d)] : pick(d);
+  const mx = Math.max(...vis.flatMap(d => vals(d).map(Math.abs)), 1e-9);
+  const y = s => PAD.t + (hi - s)/(hi - lo) * (H - PAD.t - PAD.b);
+  const zx = PAD.l + (W - PAD.l - PAD.r)/2;
+  const x = v => zx + (v/mx) * ((W - PAD.l - PAD.r)/2 - 4);
+
+  g.strokeStyle = "#21262d"; g.lineWidth = 1;
+  for (let i=0;i<=4;i++){ const s = lo + (hi-lo)*i/4;
+    g.beginPath(); g.moveTo(PAD.l, y(s)); g.lineTo(W-PAD.r, y(s)); g.stroke();
+    g.fillStyle = "#8b949e"; g.font="10px ui-monospace"; g.textAlign="right";
+    g.fillText(s.toFixed(0), PAD.l-5, y(s)+3); }
+  // The scale (audit F3): round ticks in the DISPLAYED unit, mapped back to raw.
+  const f = opts.factor || 1, fmt = opts.fmt || (v => fmtCount(v));
+  g.textAlign = "center";
+  for (const t of niceTicks(-mx * f, mx * f, 6)) {
+    const X = x(t / f); if (X < PAD.l || X > W - PAD.r) continue;
+    g.strokeStyle = "#21262d"; g.beginPath(); g.moveTo(X, PAD.t); g.lineTo(X, H - PAD.b); g.stroke();
+    g.fillStyle = "#8b949e"; g.fillText(t === 0 ? "0" : fmt(t), X, H - PAD.b + 12);
+  }
+  if (opts.unit) { g.textAlign = "right"; g.fillText(opts.unit, W - PAD.r, H - 4); }
+  g.strokeStyle = "#30363d"; g.beginPath(); g.moveTo(zx, PAD.t); g.lineTo(zx, H-PAD.b); g.stroke();
+
+  // Bar thickness from the SMALLEST strike gap in view (audit F5): sizing by
+  // the strike COUNT overprinted ~100 neighbouring bars in 0DTE/1D-only views.
+  let gap = Infinity;
+  for (let i = 1; i < vis.length; i++) gap = Math.min(gap, y(vis[i-1].strike) - y(vis[i].strike));
+  const bh = Math.max(1, Math.min(isFinite(gap) ? gap * 0.8 : 6, 6));
+  for (const d of vis) {
+    if (opts.net) {
+      const n = pick(d);
+      g.fillStyle = n >= 0 ? "#3fb950" : "#f85149";
+      g.fillRect(Math.min(zx, x(n)), y(d.strike)-bh/2, Math.abs(x(n)-zx), bh);
+    } else {
+      const [a,b] = pick(d);
+      g.fillStyle = "#3fb950"; g.fillRect(zx, y(d.strike)-bh/2, x(a)-zx, bh);
+      g.fillStyle = "#f85149"; g.fillRect(Math.min(zx,x(b)), y(d.strike)-bh/2, Math.abs(x(b)-zx), bh);
+    }
+  }
+  g.strokeStyle = "#58a6ff"; g.setLineDash([4,3]);
+  g.beginPath(); g.moveTo(PAD.l, y(spot)); g.lineTo(W-PAD.r, y(spot)); g.stroke();
+  g.setLineDash([]);
+  g.fillStyle="#58a6ff"; g.textAlign="left"; g.font="10px ui-monospace";
+  g.fillText("spot "+spot.toFixed(2), PAD.l+3, y(spot)-4);
+  return {vis, y, x, zx, lo, hi, PAD, W, H};
+}
+
+function trend(cv, series) {
+  const {g,W,H} = fit(cv);
+  const cap = `times = when received · ${lagNote(historyLag)}`;
+  const PAD = {t:10, b: 21 + captionHeight(g, cap, W, 58, 10), l:58, r:10};
+  // Stored dollar GEX, converted per point with that poll's own spot when
+  // raw units are chosen. Points are placed by TIME over the full stored
+  // range, so switching units never moves one sideways (index
+  // spacing did, and also hid real time gaps). A point
+  // that cannot be converted stays a GAP -- the line breaks there -- and is
+  // counted; it never gets another poll's spot or a zero.
+  // `unavailable`: the server could not read that poll's aggregate to apply
+  // the settlement filter -- a GAP, never the unfiltered stored total.
+  const placed = series.filter(p => (p.gex != null || p.unavailable) && toDate(p.t))
+    .map(p => ({...p, ms: +toDate(p.t), v: p.unavailable ? null : GexMath.trendGex(p, units)}))
+    .sort((a, b) => a.ms - b.ms);
+  const pts = placed.filter(p => p.v !== null);
+  // Different losses, labelled apart: a point with no valid spot, or
+  // an unreadable one, is placed and breaks the line; one with an unreadable
+  // time cannot be placed at all, so its neighbours stay joined.
+  const unread = placed.filter(p => p.unavailable).length;
+  const noSpot = placed.length - pts.length - unread;
+  const untimed = series.filter(p => (p.gex != null || p.unavailable) && !toDate(p.t)).length;
+  const losses = [noSpot ? `${noSpot} point(s) unavailable in these units (no valid spot) — line broken there` : "",
+                  unread ? `${unread} point(s) whose snapshot could not be read — line broken there` : "",
+                  untimed ? `${untimed} point(s) with an unreadable time, not placed` : ""].filter(Boolean);
+  g.fillStyle="#8b949e"; g.font="10px ui-monospace";
+  if (pts.length < 2) {         // say why the chart is empty, never just blank it
+    g.textAlign = "center";
+    g.fillText(losses.length ? `${pts.length} of ${pts.length + noSpot + unread + untimed} stored snapshot(s) can be shown in ` +
+                               `${GexMath.UNITS[units].gex}, 2 needed: ${losses.join("; ").replace(" — line broken there", "")}`
+                             : "fewer than 2 stored snapshots this session", W/2, H/2);
+    return null;
+  }
+  const sc = GexMath.scaleFor(Math.max(...pts.map(p => Math.abs(p.v))));
+  const val = p => p.v / sc.div;
+  const vals = pts.map(val);
+  let mn = Math.min(...vals), mx = Math.max(...vals);
+  if (mn === mx) { mn -= 1; mx += 1; }
+  const pad = (mx-mn)*0.1; mn -= pad; mx += pad;
+  const t0 = placed[0].ms, t1 = placed[placed.length-1].ms;
+  const x = ms => PAD.l + (t1 > t0 ? (ms - t0)/(t1 - t0) : 0.5) * (W-PAD.l-PAD.r);
+  const y = v => PAD.t + (mx-v)/(mx-mn) * (H-PAD.t-PAD.b);
+
+  g.strokeStyle="#21262d";
+  for (const v of niceTicks(mn, mx, 4)) {        // round ticks; 0 labelled when in range (audit F9)
+    g.beginPath(); g.moveTo(PAD.l,y(v)); g.lineTo(W-PAD.r,y(v)); g.stroke();
+    g.fillStyle="#8b949e"; g.font="10px ui-monospace"; g.textAlign="right";
+    g.fillText(v === 0 ? "0" : String(Number(v.toPrecision(6))), PAD.l-5, y(v)+3); }
+  if (mn < 0 && mx > 0) {   // zero line matters: it is the gamma sign flip
+    g.strokeStyle="#484f58"; g.setLineDash([3,3]);
+    g.beginPath(); g.moveTo(PAD.l,y(0)); g.lineTo(W-PAD.r,y(0)); g.stroke(); g.setLineDash([]); }
+
+  g.strokeStyle="#58a6ff"; g.fillStyle="#58a6ff"; g.lineWidth=1.5; g.beginPath();
+  let pen = false;
+  placed.forEach(p => {
+    if (p.v === null) { pen = false; return; }          // gap: lift the pen
+    pen ? g.lineTo(x(p.ms), y(val(p))) : g.moveTo(x(p.ms), y(val(p)));
+    pen = true;
+  });
+  g.stroke(); g.lineWidth=1;
+  placed.forEach((p, i) => {                             // a point isolated by gaps
+    if (p.v !== null && !(placed[i-1] && placed[i-1].v !== null) && !(placed[i+1] && placed[i+1].v !== null)) {
+      g.beginPath(); g.arc(x(p.ms), y(val(p)), 1.5, 0, 7); g.fill(); } });
+  // Mixed-age points: saved before the first today-dated trade, i.e. the
+  // previous session's greeks scaled by today's spot. Marked, not hidden.
+  const day = latest && latest.session_date;
+  const mixed = pts.map(p => !!(day && p.newest_trade && String(p.newest_trade).slice(0, 10) < day));
+  if (mixed.some(Boolean)) {
+    g.fillStyle = "#d29922";
+    pts.forEach((p, i) => { if (mixed[i]) { g.beginPath(); g.arc(x(p.ms), y(val(p)), 2.5, 0, 7); g.fill(); } });
+    g.font = "10px ui-monospace"; g.textAlign = "left";
+    g.fillText("● mixed-age (previous session's greeks)", PAD.l + 4, PAD.t + 10);
+  }
+  g.fillStyle="#8b949e"; g.font="10px ui-monospace"; g.textAlign="right";
+  g.fillText([`${sc.suf ? sc.suf + " " : ""}${GexMath.UNITS[units].gex}`, ...losses].join(" · "),
+             W-PAD.r, PAD.t+10);
+  const first = placed[0].t, last = placed[placed.length-1].t;
+  g.textAlign="left";
+  g.fillText(tzTime(first).slice(0,5), PAD.l, H - PAD.b + 12);
+  drawCaption(g, cap, W, H, PAD.l, PAD.r);
+  g.fillStyle = "#8b949e"; g.font = "10px ui-monospace";
+  g.textAlign="right"; g.fillText(tzTime(last).slice(0,5)+" "+tzAt(toDate(last) || new Date()), W-PAD.r, H - PAD.b + 12);
+  return {pts, x, y, PAD, W, H, mn, mx};
+}
+
+// --- crosshair ------------------------------------------------------------
+function attachCrosshair(cv, tipEl, getCtx, describe) {
+  let ctx = null;
+  const redraw = () => { ctx = getCtx(); };
+  cv.addEventListener("mousemove", e => {
+    ctx = ctx || getCtx();
+    if (!ctx) return;
+    const r = cv.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const g = cv.getContext("2d");
+    redraw();                                  // repaint base, then overlay
+    if (!ctx) { tipEl.style.display = "none"; return; }   // nothing drawn: no stale tip
+    g.save();
+    g.strokeStyle = "#8b949e88"; g.setLineDash([2,2]);
+    g.beginPath(); g.moveTo(ctx.PAD.l, my); g.lineTo(ctx.W-ctx.PAD.r, my);
+    g.moveTo(mx, ctx.PAD.t); g.lineTo(mx, ctx.H-ctx.PAD.b); g.stroke();
+    g.restore();
+    const txt = describe(ctx, mx, my);
+    if (txt) {
+      tipEl.style.display = "block";
+      tipEl.textContent = txt;
+      const tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
+      tipEl.style.left = Math.min(mx+12, cv.clientWidth-tw-4) + "px";
+      tipEl.style.top  = Math.min(my+12, cv.clientHeight-th+22) + "px";
+    } else tipEl.style.display = "none";
+  });
+  cv.addEventListener("mouseleave", () => { tipEl.style.display="none"; redraw(); });
+}
+
+function nearestStrike(ctx, my) {
+  let best=null, bd=1e9;
+  for (const d of ctx.vis) { const dd = Math.abs(ctx.y(d.strike)-my);
+    if (dd < bd) { bd=dd; best=d; } }
+  return bd < 14 ? best : null;
+}
+
+const fmtN = v => Math.round(v).toLocaleString("en-US");
+// Ratio from SUMMED counts across all strikes (never an average of per-strike
+// ratios). A descriptive count, not buying pressure or sentiment.
+const pcr = (put, call) => call > 0 ? (put / call).toFixed(2) : "N/A — zero call contracts";
+
+function countNotes(rows) {
+  let co = 0, po = 0, cv = 0, pv = 0;
+  for (const d of rows) { co += d.co; po += d.po; cv += d.cv; pv += d.pv; }
+  const scope = `selected buckets · totals over ALL strikes, bars ±12% of spot · put bars drawn left, but counts are positive`;
+  $("oinote").innerHTML =
+    `calls ${fmtN(co)} · puts ${fmtN(po)} · OI put/call ${pcr(po, co)} — ${scope}<br>` +
+    `Open interest is normally the previous settlement; a zero may be a missing value.` +
+    ex(howto("how many contracts are open at each strike. Strikes far from spot can hold large open interest but little gamma — compare with the GEX chart.") +
+      `CBOE-reported open interest. The daily OCC comparison, and which snapshot it checked, is in Feed health above. ` +
+      `Open contracts only: it does not say who holds them.`);
+  const f = (latest && latest.feed) || {};
+  const mixed = latest && latest.session_date && etDateOf(f.newest_trade_time) < latest.session_date;
+  $("volnote").innerHTML =
+    `calls ${fmtN(cv)} · puts ${fmtN(pv)} · volume put/call ${pcr(pv, cv)} — ${scope}<br>` +
+    `Cumulative and unsigned (not flow); a zero may be a missing value.` +
+    (mixed ? `<br><span class="warn">This snapshot may contain the previous session's cumulative volume.</span>` : "") +
+    ex(howto("where contracts traded today, by strike — activity, not direction.") +
+      `CBOE cumulative volume, UNSIGNED: it cannot tell buys from sells or opening from closing — not flow.`);
+}
+
+// Totals under the GEX and DEX profiles: SELECTED buckets, ALL strikes -- the
+// scope of the bars above them (the header is all expiries). Both unit
+// systems are shown, the chosen one first.
+function exposureNotes(rows) {
+  if (!active.size) {
+    $("gexnote").textContent = $("dexnote").textContent = "no expiry buckets selected";
+    return;
+  }
+  const S = latest.spot, other = units === "raw" ? "usd" : "raw";
+  let g = 0, d = 0;
+  for (const r of rows) { g += r.cg - r.pg; d += r.cd + r.pd; }
+  const both = (fn, v, key) => `<b>${GexMath.fmt(fn(v, S, units), units)}</b> ${GexMath.UNITS[units][key + "Sfx"]}` +
+    ` <span class="dim ex">(${GexMath.fmt(fn(v, S, other), other)} ${GexMath.UNITS[other][key + "Sfx"]})</span>`;
+  const f = latest.feed || {};
+  // Changing units does not refresh stale greeks, so the warning shows in both.
+  const warn = latest.session_date && etDateOf(f.newest_trade_time) < latest.session_date
+    ? `<br><span class="warn">Saved before today's first trade: these greeks are the previous session's.</span>` : "";
+  const scope = "selected buckets · totals over ALL strikes, bars ±12% of spot";
+  $("gexnote").innerHTML =
+    `net GEX ${both(GexMath.gexIn, g, "gex")} · GEX ratio <b>${GexMath.fmtRatio(GexMath.gexRatio(latest.rows, active))}</b> — ${scope}` + warn +
+    ex(howto("where gamma sits by strike, measured at the current spot. Under the assumed dealer sign (calls +, puts −), positive strikes are where dealer hedging " +
+             "would lean against price moves and negative strikes where it would add to them. That reading rests on the assumption and is descriptive, not a forecast.") +
+      `GEX ratio: calls netted against puts at each strike across the selected expiries, then positive strike nets ÷ |strike nets| ` +
+      `(GEXStream's published definition; their expiry set may differ). 0.5 = zero net gamma. ` +
+      `Signs assume calls +, puts −: dealer positioning is not observable.`);
+  $("dexnote").innerHTML =
+    `net DEX ${both(GexMath.dexIn, d, "dex")} — ${scope}` + warn +
+    ex(howto("where the delta of all open contracts sits by strike, as if one holder owned them all — not dealer positioning.") +
+      `DEX is the net delta of ALL open contracts, as if held long (GEXStream's definition) — <b>not dealer delta</b>: unlike GEX, no dealer sign is applied. ` +
+      `Delta shares = Σ delta × OI × 100 (CBOE's put deltas are already negative); $ delta = shares × spot. ` +
+      `Raw GEX = Σ gamma × OI × 100 (delta shares per $1 move, GEXStream's unit); $ per 1% move = raw × spot² × 0.01.`);
+}
+
+// GEX view (audit F4): the per-strike NET -- what the header, ratio and tracks
+// are built from -- by default; calls & puts separately on request.
+let gexMode = "net";
+try { const m = localStorage.getItem("gex.gexmode"); if (m === "net" || m === "split") gexMode = m; } catch (e) {}
+// Axis labels keep up to 2 decimals and trim zeros, so a 1.5M tick never reads "2M".
+// Ticks are multiples of 1/2/5 x 10^k: 2 decimals always suffice.
+const axisFmt = u => v => { const a = Math.abs(v), sc = GexMath.scaleFor(a);
+  return `${v < 0 ? "−" : ""}${u === "raw" ? "" : "$"}${Number((a / sc.div).toFixed(2))}${sc.suf}`; };
+function gexOpts() {
+  const S = latest ? latest.spot : 0;
+  return {factor: units === "raw" ? 1 : S * S * 0.01, fmt: axisFmt(units), net: gexMode === "net",
+          unit: GexMath.UNITS[units].gex + (gexMode === "net" ? " · net per strike" : "")};
+}
+function dexOpts() {
+  const S = latest ? latest.spot : 0;
+  return {factor: units === "raw" ? 1 : S, fmt: axisFmt(units), unit: GexMath.UNITS[units].dex};
+}
+const gexPick = d => gexMode === "net" ? d.cg - d.pg : [d.cg, -d.pg];
+
+// No snapshot at all (an empty store): drawAll() has nothing to draw, but the
+// panels that can render without one should say why they are empty.
+function drawEmpty() {
+  if (latest) return;
+  wallCtx = drawWalls($("wallcv")); oiHistCtx = drawOiHistory($("oihistcv")); oiWallNote();
+  trackCtx = drawTracks($("trackcv")); trackNote();
+  heatCtx = drawHeat($("heatcv")); heatNote();
+  termCtx = drawTerm($("termcv")); termNote();
+}
+function drawAll() {
+  if (!latest) return;
+  const rows = rollup(latest.rows), s = latest.spot;
+  gexCtx = profile($("gexcv"), rows, gexPick, s, gexOpts());
+  dexCtx = profile($("dexcv"), rows, d => [d.cd, d.pd], s, dexOpts());
+  oiCtx = profile($("oicv"), rows, d => [d.co, -d.po], s, {unit: "open contracts"});
+  volCtx = profile($("volcv"), rows, d => [d.cv, -d.pv], s, {unit: "contracts traded"});
+  countNotes(rows);
+  exposureNotes(rows);
+  trendCtx = trend($("trendcv"), history);
+  smileCtx = smileChart($("smilecv"));
+  wallCtx = drawWalls($("wallcv"));
+  oiHistCtx = drawOiHistory($("oihistcv"));
+  oiWallNote();
+  trackCtx = drawTracks($("trackcv"));
+  trackNote();
+  heatCtx = drawHeat($("heatcv"));
+  heatNote();
+  termCtx = drawTerm($("termcv"));
+  termNote();
+}
+let gexCtx=null, dexCtx=null, trendCtx=null, smileCtx=null, oiCtx=null, volCtx=null, wallCtx=null, oiHistCtx=null, trackCtx=null, termCtx=null, heatCtx=null;
+attachCrosshair($("smilecv"), $("smiletip"), () => (smileCtx = smileChart($("smilecv"))), smileDescribe);
+
+attachCrosshair($("gexcv"), $("gextip"),
+  () => (gexCtx = profile($("gexcv"), rollup(latest?latest.rows:[]), gexPick, latest?latest.spot:0, gexOpts())),
+  (ctx,mx,my) => { const d = nearestStrike(ctx,my); if (!d || !latest) return null;
+    // Same units as the header: $ per 1% move = gamma*OI*100 * S^2 * 0.01, or
+    // the raw gamma*OI*100 sum when "raw" is chosen (a first version printed
+    // that raw sum with an "M" suffix and called it dollars).
+    const S = latest.spot, f = v => GexMath.fmt(GexMath.gexIn(v, S, units), units);
+    return `strike ${d.strike}   (${GexMath.UNITS[units].gex})\ncall  ${f(d.cg)}\nput   ${f(-d.pg)}\nnet   ${f(d.cg-d.pg)}`; });
+
+attachCrosshair($("dexcv"), $("dextip"),
+  () => (dexCtx = profile($("dexcv"), rollup(latest?latest.rows:[]), d=>[d.cd,d.pd], latest?latest.spot:0, dexOpts())),
+  (ctx,mx,my) => { const d = nearestStrike(ctx,my); if (!d || !latest) return null;
+    // Dollar delta = delta*OI*100 * S, or delta shares = delta*OI*100 raw
+    // (CBOE's put deltas are already negative).
+    const S = latest.spot, f = v => GexMath.fmt(GexMath.dexIn(v, S, units), units);
+    return `strike ${d.strike}   (${GexMath.UNITS[units].dex})\ncall  ${f(d.cd)}\nput   ${f(d.pd)}\nnet   ${f(d.cd+d.pd)}`; });
+
+attachCrosshair($("oicv"), $("oitip"),
+  () => (oiCtx = profile($("oicv"), rollup(latest?latest.rows:[]), d=>[d.co,-d.po], latest?latest.spot:0, {unit: "open contracts"})),
+  (ctx,mx,my) => { const d = nearestStrike(ctx,my); if (!d) return null;
+    return `strike ${d.strike}   (open contracts)\ncall  ${fmtN(d.co)}\nput   ${fmtN(d.po)}\ntotal ${fmtN(d.co+d.po)}`; });
+
+attachCrosshair($("volcv"), $("voltip"),
+  () => (volCtx = profile($("volcv"), rollup(latest?latest.rows:[]), d=>[d.cv,-d.pv], latest?latest.spot:0, {unit: "contracts traded"})),
+  (ctx,mx,my) => { const d = nearestStrike(ctx,my); if (!d) return null;
+    return `strike ${d.strike}   (contracts traded, unsigned)\ncall  ${fmtN(d.cv)}\nput   ${fmtN(d.pv)}\ntotal ${fmtN(d.cv+d.pv)}`; });
+
+attachCrosshair($("wallcv"), $("walltip"), () => (wallCtx = drawWalls($("wallcv"))),
+  (ctx,mx,my) => { const d = nearestStrike(ctx,my); if (!d) return null;
+    return `strike ${d.strike}   (front expiry, open contracts)\ncalls ${fmtN(d.c)}\nputs  ${fmtN(d.p)}\ntotal ${fmtN(d.oi)}`; });
+
+attachCrosshair($("oihistcv"), $("oihisttip"), () => (oiHistCtx = drawOiHistory($("oihistcv"))),
+  (ctx,mx,my) => { const i = Math.floor((mx - ctx.PAD.l) / ctx.sw); const s = ctx.ss[i]; if (!s) return null;
+    if (s.status !== "ok") return `${s.date}\n${s.status}: ${s.reason}`;
+    if (!s.top.length) return `${s.date}  expiry ${s.front_label || s.front_expiry}\n${(s.problems || []).join("; ")}`;
+    const ch = s.change || {};
+    const nr = (s.top_near || [])[0];
+    return `${s.date}  expiry ${s.front_label || s.front_expiry} (${s.labels.join(", ")})\ntotal OI ${fmtN(s.total_oi)}\n` +
+      `within ±12% of spot: ${nr ? topTxt(nr) : "unavailable"}\nover all strikes:     ${topTxt(s.top[0])}` +
+      (s.top.length > 1 ? `\n  (#2 ${topTxt(s.top[1])}${s.top[2] ? `; #3 ${topTxt(s.top[2])}` : ""})` : "") + `\nspot ${s.spot}` +
+      `\nOI change: ${ch.available ? `${pct1(ch.pct)} vs ${ch.baseline_session}` : ch.reason}` +
+      (s.unreadable_skipped ? `\n${s.unreadable_skipped} unreadable snapshot(s) skipped` : ""); });
+
+attachCrosshair($("trackcv"), $("tracktip"), () => (trackCtx = drawTracks($("trackcv"))),
+  (ctx,mx,my) => { let p = null, bd = Infinity;
+    for (const q of ctx.placed) { const d = Math.abs(ctx.x(q.ms) - mx); if (d < bd) { bd = d; p = q; } }
+    if (!p) return null;
+    const day = latest && latest.session_date;
+    const mixed = day && p.newest_trade && String(p.newest_trade).slice(0, 10) < day;
+    const head = `received ${tzTime(p.t)} ${tzAt(toDate(p.t) || new Date())} · ${ptAge(p)}\nspot ${posNum(p.spot) ? p.spot : "—"}${mixed ? "\nmixed-age: previous session's greeks" : ""}`;
+    if (p.status !== "ok") return `${head}\n${p.status}: ${p.reason}`;
+    return `${head}\nmax  ${extTxt(p.max, p, p.max_none)}\nmin  ${extTxt(p.min, p, p.min_none)}\nGEX ratio ${GexMath.fmtRatio(p.ratio)}`; });
+
+attachCrosshair($("heatcv"), $("heattip"), () => (heatCtx = drawHeat($("heatcv"))),
+  (ctx, mx, my) => {
+    if (mx < ctx.PAD.l || mx > ctx.W - ctx.PAD.r || my < ctx.PAD.t || my > ctx.H - ctx.PAD.b) return null;
+    const r = GexMath.heatRowAt(ctx.rows, my);             // same whole-pixel rows as the painting
+    const i = GexMath.heatOwner(ctx.geo, mx);              // same owner rule as the painting
+    if (i < 0) return `no snapshot here — a collection gap (no data)${r ? `\nstrike ${r.k}` : ""}`;
+    const c = ctx.cols[i], day = latest && latest.session_date;
+    const mixed = day && c.newest_trade && String(c.newest_trade).slice(0, 10) < day;
+    const head = `received ${tzTime(c.t)} ${tzAt(toDate(c.t) || new Date())} · ${ptAge(c)}\nspot ${posNum(c.spot) ? c.spot : "— (no valid spot)"}` +
+      (mixed ? "\nmixed-age: previous session's greeks" : "");
+    if (!Array.isArray(c.values)) return `${head}\nsnapshot unavailable — ${c.status}: ${c.reason || "no values"}`;
+    if (!r) return head;
+    const raw = c.values[r.i];
+    if (raw == null) return `${head}\nstrike ${r.k}: no data — this strike is not in this snapshot`;
+    const usd = GexMath.gexIn(raw, c.spot, "usd");
+    return `${head}\nstrike ${r.k}   net (calls − puts, all expiries)\n` +
+      `${GexMath.fmt(usd, "usd")} per 1% move${usd === null ? " (no valid spot)" : ""}\n${GexMath.fmt(raw, "raw")} shares per $1 move`; });
+
+attachCrosshair($("termcv"), $("termtip"), () => (termCtx = drawTerm($("termcv"))),
+  (ctx,mx,my) => { let e = null, bd = Infinity;
+    for (const q of ctx.exps) { const d = Math.abs(ctx.x(termX(q)) - mx); if (d < bd) { bd = d; e = q; } }
+    if (!e) return null;
+    const lines = Object.entries(e.values).map(([t, v]) => `${t.padEnd(8)} ${v.iv == null ? "— " + v.reason
+      : (v.iv * 100).toFixed(2) + "%  (" + (v.strikes.length > 1 ? `${v.strikes[0]}–${v.strikes[1]}, w ${v.weight.toFixed(2)}` : `${v.strikes[0]} exact`) + ")"}`);
+    return `${e.expiry}${e.settle ? " " + e.settle + "-settled" : ""}  ${e.dte === 0 ? "0DTE" : e.dte + "d"}\n${lines.join("\n")}\nskew 25Δ  ${e.skew_25.vol_pts == null ? "— " + e.skew_25.reason : (e.skew_25.vol_pts >= 0 ? "+" : "") + e.skew_25.vol_pts.toFixed(2) + " vol pts"}`; });
+
+attachCrosshair($("trendcv"), $("trendtip"),
+  () => (trendCtx = trend($("trendcv"), history)),
+  (ctx,mx,my) => { if (!ctx) return null;
+    // Nearest SHOWN point in time (points are placed by timestamp, not index).
+    let p = null, bd = Infinity;
+    for (const q of ctx.pts) { const d = Math.abs(ctx.x(q.ms) - mx); if (d < bd) { bd = d; p = q; } }
+    if (!p) return null;
+    return `received ${tzTime(p.t)} ${tzAt(toDate(p.t) || new Date())} · ${ptAge(p)}\nGEX  ${GexMath.fmt(p.v, units, 3)} ${GexMath.UNITS[units].gex}\nspot ${p.spot}`; });
+
+function render(v) {
+  const changed = !latest || latest.poll_key !== v.poll_key;
+  // Keep the current trend while the new one loads (same day: it only gains
+  // a point), but drop it at once if the session day changed.
+  if (!latest || latest.session_date !== v.session_date) { history = []; historyLag = null; }
+  latest = v;
+  if (changed) { loadHistory(); loadSmile(); loadOi(); loadTracks(); loadTerm(); }
+  renderHeader();
+  renderFeed();
+  renderHealth();
+  drawAll();
+}
+
+// ---- after the options close (audit F2) -------------------
+// Session end comes from the CLOCK and the calendar-derived scheduled close the
+// server sends (early closes included) -- never from receipt times, which
+// cannot tell a stalled collector from a closed market. The snapshot is NOT
+// claimed to be "as of the close": it is the last one stored.
+function sessionEnded() {
+  const c = latest && latest.options_close_utc && Date.parse(latest.options_close_utc);
+  return !!c && Date.now() >= c;
+}
+// The session's EXPIRING series has settled (SPXW 16:00 / 13:00 -- before the
+// 16:15 session close; SPY: the same instant). Older views fall back.
+function expiringEnded() {
+  const c = latest && latest.expiring_settles_utc && Date.parse(latest.expiring_settles_utc);
+  return c ? Date.now() >= c : sessionEnded();
+}
+// An OI summary's front series has settled, by its own clock.
+const frontEnded = cur => cur.front_settles_utc ? Date.now() >= Date.parse(cur.front_settles_utc) : sessionEnded();
+function renderPostClose() {
+  const el = $("postclose");
+  if (!latest || !expiringEnded()) { el.hidden = true; return; }
+  const exp = (latest.rows || []).filter(r => r.bucket === "0DTE");   // expiry == the session date
+  if (!exp.length) { el.hidden = true; return; }
+  let raw = 0;
+  for (const r of exp) raw += r.call_gamma_oi - r.put_gamma_oi;
+  const S = latest.spot, part = GexMath.gexIn(raw, S, units);
+  const tot = units === "raw" ? latest.net_gamma_raw : latest.net_gex_per_pct;
+  const f = latest.feed || {}, sfx = GexMath.UNITS[units].gexSfx;
+  el.innerHTML = `Options trading for the ${latest.session_date} expiry has ended; showing the last stored snapshot ` +
+    `(received ${tzStamp(f.received_at)}, newest trade ${tzStamp(f.newest_trade_utc)}). ` +
+    `Series expiring ${latest.session_date} contribute <b>${GexMath.fmt(part, units)}</b> ${sfx} to a net GEX of ` +
+    `<b>${GexMath.fmt(tot, units)}</b> ${sfx} (parts can exceed the total: calls and puts net against each other). ` +
+    `Deselect 0DTE to drop them from the by-strike charts; the header, the open-interest panel and the tracks keep this snapshot.`;
+  el.hidden = false;
+}
+
+// Header figures: ALL expiries, all strikes, straight from the server (the
+// dollar ones exactly as stored in metadata) -- never re-derived here.
+function renderHeader() {
+  const v = latest; if (!v) return;
+  const raw = units === "raw";
+  $("spot").textContent = v.spot ? v.spot.toFixed(2) : "—";
+  $("gex").textContent = GexMath.fmt(raw ? v.net_gamma_raw : v.net_gex_per_pct, units, 3);
+  $("gexunit").textContent = GexMath.UNITS[units].gexSfx;
+  $("gexunit").title = GexMath.UNITS[units].gex;
+  $("gexratio").textContent = GexMath.fmtRatio(v.gex_ratio);
+  // Net as a share of gross (audit F10): a small net is a difference of two
+  // large numbers and can flip sign on small changes to either side.
+  let gross = 0;
+  for (const r of v.rows || []) gross += (r.call_gamma_oi || 0) + (r.put_gamma_oi || 0);
+  const share = gross > 0 && v.net_gamma_raw != null ? v.net_gamma_raw / gross : null;
+  $("gexgross").textContent = share == null ? "" : `· ${Math.abs(share * 100).toFixed(0)}% of gross`;
+  $("gexgross").title = share == null ? "" : `gross gamma (calls + puts, no netting): ${GexMath.fmt(GexMath.gexIn(gross, v.spot, units), units)} ${GexMath.UNITS[units].gexSfx}`;
+  // After-hours spot (audit F8): the price the snapshot carries was taken after
+  // the equity close (options close - 15 min) once the measured lag is removed.
+  const measured = (tracks && tracks.session_date === v.session_date ? tracks.median_lag_s : null) ?? historyLag;
+  const lagMs = (measured ?? 960) * 1000;
+  const recv = Date.parse(((v.feed || {}).received_at) || ""), oc = Date.parse(v.options_close_utc || "");
+  const ah = isFinite(recv) && isFinite(oc) && recv - lagMs >= oc - 15 * 60000;
+  $("spottag").textContent = ah ? "possibly after-hours" : "";
+  $("spottag").title = ah ? `Estimated: receipt time minus ${measured != null ? `this session's measured median newest-option-trade age (${lagMin(measured)} min)` : "an ASSUMED 16-min delay (no live snapshot to measure yet)"} ` +
+    `falls after the equity close (${tzStamp(new Date(oc - 15 * 60000).toISOString())}, from the trading calendar). The spot carries no timestamp of its own.` : "";
+  $("dex").textContent = GexMath.fmt(raw ? v.net_delta_shares : v.net_dex, units, 3);
+  $("dexunit").textContent = GexMath.UNITS[units].dexSfx;
+  $("dexunit").title = GexMath.UNITS[units].dex;
+  renderPostClose();
+}
+
+function renderFeed() {
+  const v = latest; if (!v) return;
+  const f = v.feed || {};
+  const notToday = v.session_date && v.session_date !== todayET();
+  // Clocks, never conflated: publication age is NOT data age. Newest trade is
+  // the only one that reflects real market activity.
+  $("feed").innerHTML =
+    (streamDown ? `<span class="warn">stream disconnected — retrying; showing last received</span><br>` : "") +
+    `<b>session ${v.session_date || "—"}</b>` +
+    (notToday ? ` <span class="warn">— NOT today: last stored session (buckets are relative to that day)</span>` : "") + `<br>` +
+    `<span class="warn">${f.delay_note || ""}</span><br>` +
+    `newest trade ${tzStamp(f.newest_trade_utc)} (${ageOf(f.newest_trade_utc)} ago)` +
+    `<span class="ex"> · snapshot published ${ageOf(f.snapshot_time)} ago<br>` +
+    `saved by collector ${tzStamp(f.received_at)} (${ageOf(f.received_at)} ago) · source: ${v.source || "—"}<br>` +
+    `${v.n_contracts || 0} contracts · ${v.n_rows || 0} strike-expiry rows</span>`;
+}
+
+// The trend is anchored server-side to the displayed poll (poll_key). Apply a
+// response only if it is for the poll still on screen -- an older, slower
+// response must not overwrite a newer one -- and never draw another day's
+// trend under this session's label.
+// ---- IV smile --------------------------------------------------------------
+// Anchored to the poll on screen, like the trend. Display rules
+// (2026-09-29): the put/call switch at spot is never bridged by a line; gaps
+// left by filtered strikes stay gaps; each expiry's zoom range is its own, so
+// a sparse 0DTE curve is not flattened by the rest, and clipped points are
+// marked and counted, with a full-range toggle.
+const SMILE_COLORS = ["#58a6ff", "#3fb950", "#d29922", "#f778ba", "#a371f7",
+                      "#39c5cf", "#ff7b72", "#e3b341"];
+const SMILE_TARGETS = [0, 7, 30, 60, 90];
+let smile = null, smileKey = null, smileBusy = false, smileSel = null, smileFull = false;
+
+function defaultSmileSel(exps) {
+  // Each target's nearest expiry found independently, THEN deduplicated by the
+  // set (a first version skipped already-picked expiries and so reached for
+  // far ones). Only expiries with plotted points are candidates.
+  // An expiry whose options trading has ended is skipped when choosing
+  // DEFAULTS only; it stays selectable.
+  const sel = new Set(), cand = exps.filter(e => e.retained > 0 && e.dte != null && !seriesEnded(e));
+  for (const t of SMILE_TARGETS) {
+    let best = null;
+    for (const e of cand) {
+      const d = Math.abs(e.dte - t), bd = best && Math.abs(best.dte - t);
+      // On a date with both series, prefer PM (SPXW, the continuous daily
+      // series); AM stays one click away.
+      if (!best || d < bd || (d === bd && best.settle === "AM" && e.settle !== "AM")) best = e;
+    }
+    if (best) sel.add(best.id);
+  }
+  return sel;
+}
+
+async function loadSmile() {
+  if (smileBusy) return;
+  smileBusy = true;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 15000);
+  try {
+    const r = await fetch(api("/api/smile"), {signal: ctl.signal});
+    if (!r.ok) return;
+    const sm = await r.json();
+    if (!latest || sm.poll_key !== latest.poll_key) return;
+    smile = sm;
+    if (sm.transient) { drawAll(); return; }       // keep selection; retried later
+    smileKey = sm.poll_key;
+    const exps = sm.expiries || [];
+    // smileSel stays null (pending) until there ARE eligible expiries -- an
+    // unavailable first response must not lock in an empty selection. An
+    // empty Set only ever comes from the user deselecting, and is kept.
+    if (smileSel === null) {
+      const d = defaultSmileSel(exps);
+      if (d.size) smileSel = d;
+    } else if (smileSel.size) {
+      const keep = [...smileSel].filter(x => exps.some(e => e.id === x));
+      if (keep.length) smileSel = new Set(keep);
+      else { const d = defaultSmileSel(exps); smileSel = d.size ? d : null; }  // all rolled off
+    }
+    renderSmileControls();
+    drawAll();
+  } catch (e) {}
+  finally { clearTimeout(timer); smileBusy = false; }
+}
+setInterval(() => { if (latest && smileKey !== latest.poll_key) loadSmile(); }, 10000);
+
+// ---- front-expiry open interest (server: OiCache, gex/oiwalls.py) ------------
+// Definitions are GEXStream's (per-strike OI = calls + puts, Max OI = largest
+// combined, FRONT expiry only); the design choices (2026-09-30):
+// global Max OI kept even far from spot and never clamped onto the chart's
+// edge; OI change is same-expiry vs the previous TRADING session, never
+// across a gap; GEXStream's front-chain OI Chg% (different expiries for SPY)
+// is not shown.
+let oiData = null, oiKey = null, oiBusy = false, oiRetryAt = 0;
+async function loadOi() {
+  if (oiBusy) return;
+  oiBusy = true;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 15000);
+  try {
+    const r = await fetch(api("/api/oi"), {signal: ctl.signal});
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!latest || d.poll_key !== latest.poll_key) return;
+    oiData = d;
+    // Every response sets a deadline: read errors are retried in 10 s, else
+    // re-asked in 60 s even if the poll never changes (a repaired or
+    // quarantined source surfaces). A transient answer after a good one for
+    // the same poll must not stop the retries.
+    oiKey = d.poll_key;
+    oiRetryAt = Date.now() + (d.transient ? 10000 : 60000);
+    drawAll();
+  } catch (e) {}
+  finally { clearTimeout(timer); oiBusy = false; }
+}
+setInterval(() => { if (latest && (oiKey !== latest.poll_key || (oiRetryAt && Date.now() >= oiRetryAt))) loadOi(); }, 10000);
+
+// The OI result for what is ON SCREEN: null while the session changed and
+// the new result has not arrived (or failed) -- never yesterday's shown as
+// today's. Same session, older poll: shown, flagged as refreshing (OI is
+// constant within a session; only the spot distances move).
+function oiView() {
+  if (!oiData || !latest) return null;
+  if (oiData.shown_session !== latest.session_date) return null;
+  return {d: oiData, stale: oiData.poll_key !== latest.poll_key};
+}
+// Canvas text wrapped to a width (canvas has no wrapping); returns the lines drawn.
+function wrapLines(g, text, maxW) {
+  const words = String(text).split(" "), lines = [];
+  let line = "";
+  for (const w of words) {
+    const t = line ? line + " " + w : w;
+    if (line && g.measureText(t).width > maxW) { lines.push(line); line = w; } else line = t;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+function wrapText(g, text, x, y, maxW, lh = 11) {
+  const lines = wrapLines(g, text, maxW);
+  lines.forEach((l, i) => g.fillText(l, x, y + i * lh));
+  return lines.length;
+}
+// A bottom caption: measured first, drawn upward from the canvas edge; returns
+// the height it takes so the plot can reserve it.
+function captionHeight(g, text, W, PADl, PADr) {
+  g.font = "10px ui-monospace";
+  return wrapLines(g, text, W - PADl - PADr).length * 11;
+}
+function drawCaption(g, text, W, H, PADl, PADr) {
+  g.font = "10px ui-monospace"; g.fillStyle = "#8b949e"; g.textAlign = "center";
+  const lines = wrapLines(g, text, W - PADl - PADr);
+  lines.forEach((l, i) => g.fillText(l, (PADl + W - PADr) / 2, H - 4 - (lines.length - 1 - i) * 11));
+  g.textAlign = "left";
+}
+// Round axis ticks ("nice numbers"): steps of 1, 2 or 5 x 10^k.
+function niceTicks(lo, hi, n) {
+  if (!(hi > lo)) return [lo];
+  const raw = (hi - lo) / Math.max(1, n), p = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map(m => m * p).find(v => v >= raw) || 10 * p;
+  const out = [];                                // integer multiples: no 0.6000000000000001
+  for (let k = Math.ceil(lo / step - 1e-9); k * step <= hi + step * 1e-9; k++) out.push(k === 0 ? 0 : Number((k * step).toPrecision(12)));
+  return out;
+}
+const fmtCount = v => { const a = Math.abs(v); return a >= 1e6 ? `${+(v / 1e6).toFixed(2)}M` : a >= 1e3 ? `${+(v / 1e3).toFixed(1)}K` : `${v}`; };
+// Intraday times are RECEIPT times; the data is older by the measured lag
+// (audit F1). Labelled, not shifted: the newest-trade stamp is not synchronised
+// with every greek and quote, and before the first live trade it is yesterday's.
+const lagMin = s => s == null ? null : Math.round(s / 60);
+const lagNote = s => s == null ? "data delayed (not measurable yet this session)"
+  : `median age of the newest option trade at receipt ≈${lagMin(s)} min (this session's live snapshots)`;
+// One snapshot's own age: its newest option trade vs its receipt -- or, for a
+// snapshot saved before today's first trade, the previous session's data.
+const ptAge = p => {
+  const day = latest && latest.session_date;
+  if (day && p.newest_trade && String(p.newest_trade).slice(0, 10) < day)
+    return `previous session's data (newest trade ${String(p.newest_trade).replace("T", " ")} ET)`;
+  return p.age_s == null ? "age unknown" : `newest option trade ${lagMin(p.age_s)} min before receipt`;
+};
+const pct1 = v => { if (v == null) return "N/A";
+  const a = Math.abs(v * 100).toFixed(1);       // no "−0.0%" for a hair below spot
+  return a === "0.0" ? "0.0%" : `${v >= 0 ? "+" : "−"}${a}%`; };
+const kindShort = labels => labels.map(l => l.startsWith("monthly") ? "M" : l === "quarter-end" ? "Q"
+  : l === "month-end" ? "ME" : l === "end of week" ? "W" : l === "daily" ? "" : "?").join("");
+const topTxt = t => `${t.strike} · ${fmtN(t.oi)} (${pct1(t.dist)} from spot)${t.tied ? " TIE" : ""}`;
+
+// Combined OI by strike for the front expiry: put part then call part, from
+// the left axis, over the same +-12% of spot as the other panels. Global top
+// 3 are labelled #1-#3 where they fall inside the window; near-spot ranks that
+// are not also global are labelled n1-n3 (dim).
+function drawWalls(cv) {
+  const {g,W,H} = fit(cv);
+  const v = oiView(), cur = v && v.d.current;
+  g.fillStyle = "#8b949e"; g.font = "10px ui-monospace"; g.textAlign = "center";
+  if (!v) { g.fillText(waiting(), W/2, H/2); return null; }
+  if (!cur) { g.fillText("no session with valid open interest yet", W/2, H/2); return null; }
+  if (!cur.spot) { g.fillText("no valid spot in the chosen snapshot: the ±12% window cannot be placed", W/2, H/2); return null; }
+  const spot = cur.spot, lo = spot*0.88, hi = spot*1.12;
+  const vis = cur.strikes.filter(d => d[0] >= lo && d[0] <= hi)
+    .map(d => ({strike: d[0], c: d[1], p: d[2], oi: d[1] + d[2]}));
+  const over = frontEnded(cur) && latest && cur.front_expiry === latest.session_date;
+  g.textAlign = "left";
+  let lines = wrapText(g, `expiry ${cur.front_label || cur.front_expiry} · ${cur.labels.join(", ")}${over ? " · trading ended" : ""}`, 52, 12, W - 60);
+  const g1 = cur.top[0];
+  if (g1 && (g1.strike < lo || g1.strike > hi)) {          // name it, never clamp it -- on its own line
+    g.fillStyle = "#d29922";
+    lines += wrapText(g, `Max OI over all strikes: ${g1.strike} (${pct1(g1.dist)}) — off this chart`, 52, 12 + lines * 11, W - 60);
+  }
+  const PAD = {t: 10 + lines * 11, b: 30, l: 52, r: 64};
+  if (!vis.length) { g.textAlign = "center"; g.fillText("no front-expiry strikes within ±12% of spot", W/2, H/2); return null; }
+  const ticks = niceTicks(0, Math.max(...vis.map(d => d.oi), 1), 4);
+  const mx = Math.max(ticks[ticks.length - 1], ...vis.map(d => d.oi), 1);
+  const y = s => PAD.t + (hi - s)/(hi - lo) * (H - PAD.t - PAD.b);
+  const x = v => PAD.l + v/mx * (W - PAD.l - PAD.r);
+  g.textAlign = "center";                                   // the scale (audit F3)
+  for (const t of ticks) { g.strokeStyle = "#21262d"; g.beginPath(); g.moveTo(x(t), PAD.t); g.lineTo(x(t), H - PAD.b); g.stroke();
+    g.fillStyle = "#8b949e"; g.fillText(fmtCount(t), x(t), H - PAD.b + 12); }
+  g.strokeStyle = "#21262d";
+  for (let i=0;i<=4;i++){ const s = lo + (hi-lo)*i/4;
+    g.beginPath(); g.moveTo(PAD.l, y(s)); g.lineTo(W-PAD.r, y(s)); g.stroke();
+    g.fillStyle = "#8b949e"; g.textAlign = "right"; g.fillText(s.toFixed(0), PAD.l-5, y(s)+3); }
+  const bh = Math.max(1, (H-PAD.t-PAD.b)/((hi-lo)) * 0.8);
+  for (const d of vis) {
+    g.fillStyle = "#f85149"; g.fillRect(PAD.l, y(d.strike)-bh/2, x(d.p)-PAD.l, bh);
+    g.fillStyle = "#3fb950"; g.fillRect(x(d.p), y(d.strike)-bh/2, x(d.oi)-x(d.p), bh);
+  }
+  // The ranked labels are the top 3 WITHIN this window (any global top strike
+  // inside the window is necessarily among them); an off-window global Max
+  // OI is named in the header above instead. Right-hand column, pushed apart
+  // so $1-apart strikes never overprint, each with a leader line.
+  const labels = (cur.top_near || []).map((t, i) => ({t, txt: `#${i+1} ${t.strike}${t.tied ? " tie" : ""}`, col: "#d29922"}));
+  labels.sort((a, b) => y(a.t.strike) - y(b.t.strike));
+  let lastY = -1e9;
+  for (const L of labels) { L.y = Math.max(y(L.t.strike), lastY + 11); lastY = L.y; }
+  g.font = "10px ui-monospace"; g.textAlign = "left";
+  for (const L of labels) {
+    g.strokeStyle = L.col + "88"; g.beginPath();
+    g.moveTo(x(L.t.oi) + 1, y(L.t.strike)); g.lineTo(W - PAD.r + 1, L.y); g.stroke();
+    g.fillStyle = L.col; g.fillText(L.txt, W - PAD.r + 3, L.y + 3);
+  }
+  g.strokeStyle = "#58a6ff"; g.setLineDash([4,3]);
+  g.beginPath(); g.moveTo(PAD.l, y(spot)); g.lineTo(W-PAD.r, y(spot)); g.stroke(); g.setLineDash([]);
+  g.fillStyle = "#58a6ff"; g.fillText("spot " + spot.toFixed(2), PAD.l+3, y(spot)-4);
+  g.fillStyle = "#8b949e"; g.textAlign = "right"; g.fillText("open contracts, calls + puts · #1-#3 = largest within ±12% of spot", W-PAD.r, H-3);
+  return {vis, y, PAD, W, H};
+}
+
+// One slot per TRADING session from the first stored one (closures are not
+// slots; uncaptured sessions are visible gaps). Top: spot and the Max-OI
+// strike (off-scale ones drawn as an edge arrow WITH their value, never as if
+// in range). Bottom: front total OI, log scale, coloured by expiry kind.
+function drawOiHistory(cv) {
+  const {g,W,H} = fit(cv);
+  const v = oiView(), ss = (v && v.d.sessions) || [];
+  g.fillStyle = "#8b949e"; g.font = "10px ui-monospace";
+  if (!ss.length) { g.textAlign = "center"; g.fillText(v ? "no sessions" : waiting(), W/2, H/2); return null; }
+  g.textAlign = "left";
+  const legendLines = wrapText(g, "spot (blue) · ■ Max OI within ±12% of that day's spot · ● Max OI over all strikes (grey; ringed ■ = same strike)", 58, 12, W - 68);
+  const PAD = {t: 12 + legendLines * 11, b: 34, l: 58, r: 10}, split = PAD.t + (H - PAD.t - PAD.b) * 0.58, gapY = 14;
+  const n = ss.length, sw = (W - PAD.l - PAD.r) / n, xc = i => PAD.l + (i + 0.5) * sw;
+  const ok = ss.filter(s => s.status === "ok");
+  const goodSpot = s => typeof s.spot === "number" && s.spot > 0;
+  const spots = ok.filter(goodSpot).map(s => s.spot);
+  const top2 = split + gapY, bot = H - PAD.b;
+  // Price scale only if some session has a valid spot.
+  let lo = null, hi = null, yP = null;
+  if (spots.length) {
+    lo = Math.min(...spots) * 0.97; hi = Math.max(...spots) * 1.03;
+    for (const s of ok) for (const t of [s.top_near && s.top_near[0], s.top[0]]) { const k = t && t.strike;
+      if (k && goodSpot(s) && Math.abs(k / s.spot - 1) <= 0.12) { lo = Math.min(lo, k - 2); hi = Math.max(hi, k + 2); } }
+    yP = v => PAD.t + (hi - v) / (hi - lo) * (split - PAD.t);
+    g.strokeStyle = "#21262d";
+    for (let i=0;i<=3;i++){ const v = lo + (hi-lo)*i/3;
+      g.beginPath(); g.moveTo(PAD.l, yP(v)); g.lineTo(W-PAD.r, yP(v)); g.stroke();
+      g.fillStyle = "#8b949e"; g.textAlign = "right"; g.fillText(v.toFixed(0), PAD.l-5, yP(v)+3); }
+  } else { g.textAlign = "center"; g.fillText("no session with a valid spot", (PAD.l + W) / 2, (PAD.t + split) / 2); }
+  // Bottom: log-scale OI bars, only over positive totals (a zero is labelled, not drawn).
+  const tots = ok.map(s => s.total_oi).filter(v => v > 0);
+  let yO = null;
+  if (tots.length) {
+    const lmin = Math.floor(Math.log10(Math.min(...tots)) - 0.3), lmax = Math.max(lmin + 1, Math.ceil(Math.log10(Math.max(...tots))));
+    yO = v => bot - (Math.log10(v) - lmin) / (lmax - lmin) * (bot - top2);
+    for (let e = lmin; e <= lmax; e++) { g.strokeStyle = "#21262d"; g.beginPath(); g.moveTo(PAD.l, yO(10**e)); g.lineTo(W-PAD.r, yO(10**e)); g.stroke();
+      g.fillStyle = "#8b949e"; g.textAlign = "right"; g.fillText(e >= 6 ? `${10**(e-6)}M` : e >= 3 ? `${10**(e-3)}K` : `${10**e}`, PAD.l-5, yO(10**e)+3); }
+  } else { g.textAlign = "center"; g.fillText("no session with positive open interest", (PAD.l + W) / 2, (top2 + bot) / 2); }
+  g.textAlign = "left"; g.fillText("front-expiry total OI (log scale) · M monthly, Q quarter-end, ME month-end, W end of week", PAD.l, top2 - 3);
+  const kindColor = labels => labels.some(l => l.startsWith("monthly")) ? "#a371f7"
+    : labels.some(l => l.endsWith("-end")) ? "#39c5cf" : labels.includes("end of week") ? "#6e7fd2" : "#484f58";
+  let prevSpot = null;
+  ss.forEach((s, i) => {
+    const X = xc(i);
+    if (s.status !== "ok") {                      // a visible gap, not a skipped slot
+      g.fillStyle = "#30363d55"; g.fillRect(X - sw/2 + 1, PAD.t, sw - 2, bot - PAD.t);
+      g.fillStyle = "#8b949e"; g.textAlign = "center";
+      g.fillText(s.status === "gap" ? "gap" : s.status === "invalid" ? "inv" : "err", X, bot - 4);
+      prevSpot = null; return;
+    }
+    if (s.unreadable_skipped) { g.fillStyle = "#d29922"; g.textAlign = "center"; g.fillText("!", X, PAD.t + 10); }
+    if (yO && s.total_oi > 0) {
+      g.fillStyle = kindColor(s.labels);
+      g.fillRect(X - sw*0.35, yO(s.total_oi), sw*0.7, bot - yO(s.total_oi));
+      g.fillStyle = "#e6edf3"; g.textAlign = "center"; g.fillText(kindShort(s.labels), X, yO(s.total_oi) - 3);
+    } else { g.fillStyle = "#8b949e"; g.textAlign = "center"; g.fillText("0", X, bot - 4); }
+    if (!yP) return;
+    // spot, joined only across consecutive sessions that have one
+    if (goodSpot(s)) {
+      if (prevSpot) { g.strokeStyle = "#58a6ff88"; g.beginPath(); g.moveTo(prevSpot[0], prevSpot[1]); g.lineTo(X, yP(s.spot)); g.stroke(); }
+      g.fillStyle = "#58a6ff"; g.beginPath(); g.arc(X, yP(s.spot), 2.5, 0, 7); g.fill();
+      prevSpot = [X, yP(s.spot)];
+    } else prevSpot = null;
+    const t = s.top[0], nr = goodSpot(s) && s.top_near ? s.top_near[0] : null;   // near-spot needs that day's own spot
+    const same = t && nr && t.strike === nr.strike;
+    if (t && !same) {                            // global Max OI, grey
+      g.fillStyle = "#8b949e"; g.strokeStyle = "#8b949e";
+      if (t.strike < lo || t.strike > hi) {       // off scale: arrow + value
+        const up = t.strike > hi, Y = up ? PAD.t + 4 : split - 4;
+        g.beginPath(); g.moveTo(X, Y + (up ? -4 : 4)); g.lineTo(X - 4, Y + (up ? 3 : -3)); g.lineTo(X + 4, Y + (up ? 3 : -3)); g.fill();
+        g.textAlign = "center"; g.fillText(String(t.strike), X, Y + (up ? 14 : -7));
+      } else { g.beginPath(); g.arc(X, yP(t.strike), 2.5, 0, 7); t.tied ? g.stroke() : g.fill(); }
+    }
+    if (nr && nr.strike >= lo && nr.strike <= hi) {   // near-spot Max OI, orange (hollow = exact tie)
+      g.fillStyle = "#d29922"; g.strokeStyle = "#d29922";
+      g.beginPath(); g.rect(X - 3, yP(nr.strike) - 3, 6, 6); nr.tied ? g.stroke() : g.fill();
+      if (same) { g.strokeStyle = "#8b949e"; g.beginPath(); g.rect(X - 4.5, yP(nr.strike) - 4.5, 9, 9); g.stroke(); }
+    }
+  });
+  g.fillStyle = "#8b949e"; g.textAlign = "center";
+  const every = Math.max(1, Math.ceil(n / Math.max(1, Math.floor((W - PAD.l - PAD.r) / 44))));
+  ss.forEach((s, i) => { if (i % every === 0 || i === n - 1) g.fillText(s.date.slice(5), xc(i), H - 18); });
+  return {ss, xc, sw, PAD, W, H};
+}
+
+// ---- intraday gamma tracks (server: TracksCache, gex/gammatracks.py) --------
+// Our own definition (GEXStream lists the feature, never defines it), checked
+// 2026-09-30: per snapshot, net raw gamma per strike summed over
+// ALL expiries; max = most positive, min = most negative, global across
+// strikes. Steps mean "last observed until the next snapshot"; lines break at
+// unavailable snapshots and when a sign disappears; off-scale values are edge
+// arrows with their value; the Max-OI line is a dated daily reference.
+let tracks = null, tracksKey = null, tracksBusy = false, tracksRetryAt = 0;
+const NEAR_TIE = 0.05;        // runner-up within 5%: a DISPLAY heuristic, not significance
+async function loadTracks() {
+  if (tracksBusy) return;
+  tracksBusy = true;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);
+  try {
+    const r = await fetch(api("/api/tracks"), {signal: ctl.signal});
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!latest || d.poll_key !== latest.poll_key) return;
+    tracks = d;
+    renderHeader();                             // the header's lag-based tag reads it
+    tracksKey = d.poll_key;                     // deadlines as for the OI panel
+    tracksRetryAt = Date.now() + (d.transient ? 10000 : 60000);
+    drawAll();
+  } catch (e) {}
+  finally { clearTimeout(timer); tracksBusy = false; }
+}
+setInterval(() => { if (latest && (tracksKey !== latest.poll_key || (tracksRetryAt && Date.now() >= tracksRetryAt))) loadTracks(); }, 10000);
+
+function tracksView() {
+  if (!tracks || !latest || tracks.session_date !== latest.session_date) return null;
+  return {d: tracks, stale: tracks.poll_key !== latest.poll_key};
+}
+const posNum = v => typeof v === "number" && Number.isFinite(v) && v > 0;
+const nearTie = e => e && (e.tied || (e.gap != null && e.gap < NEAR_TIE));
+
+function drawTracks(cv) {
+  const {g,W,H} = fit(cv);
+  const v = tracksView();
+  g.fillStyle = "#8b949e"; g.font = "10px ui-monospace"; g.textAlign = "center";
+  if (!v) { g.fillText(waiting(), W/2, H/2); return null; }
+  const placed = v.d.series.filter(p => toDate(p.t)).map(p => ({...p, ms: +toDate(p.t)})).sort((a, b) => a.ms - b.ms);
+  if (placed.length < 2) { g.fillText("fewer than 2 stored snapshots this session", W/2, H/2); return null; }
+  const cap = `times = when received · ${lagNote(v.d.median_lag_s)}`;
+  g.font = "10px ui-monospace";
+  const legend = "spot (blue) · max-gamma strike (green) · min-gamma strike (red) · ○ near-tie · × unavailable · ● mixed-age · - - front Max OI (dated reference)";
+  const legendH = wrapLines(g, legend, W - 68).length * 11;
+  const PAD = {t: 8 + legendH, b: 21 + captionHeight(g, cap, W, 58, 10), l:58, r:10}, split = PAD.t + (H - PAD.t - PAD.b) * 0.68, r0 = split + 18, r1 = H - PAD.b;
+  const t0 = placed[0].ms, t1 = placed[placed.length-1].ms;
+  const x = ms => PAD.l + (t1 > t0 ? (ms - t0) / (t1 - t0) : 0.5) * (W - PAD.l - PAD.r);
+  const okP = p => p.status === "ok";
+  // Price scale from valid spots and the in-window extrema only.
+  const spots = placed.map(p => p.spot).filter(posNum);
+  let yP = null, lo = null, hi = null;
+  if (spots.length) {
+    lo = Math.min(...spots) * 0.997; hi = Math.max(...spots) * 1.003;
+    for (const p of placed) if (okP(p) && posNum(p.spot)) for (const e of [p.max, p.min])
+      if (e && Math.abs(e.strike / p.spot - 1) <= 0.12) { lo = Math.min(lo, e.strike - 1); hi = Math.max(hi, e.strike + 1); }
+    yP = s => PAD.t + (hi - s) / (hi - lo) * (split - PAD.t);
+    g.strokeStyle = "#21262d"; g.textAlign = "right";
+    for (let i = 0; i <= 4; i++) { const s = lo + (hi - lo) * i / 4;
+      g.beginPath(); g.moveTo(PAD.l, yP(s)); g.lineTo(W - PAD.r, yP(s)); g.stroke();
+      g.fillStyle = "#8b949e"; g.fillText(s.toFixed(0), PAD.l - 5, yP(s) + 3); }
+  } else g.fillText("no snapshot with a valid spot: price tracks unavailable", W/2, (PAD.t + split) / 2);
+  const inR = k => yP && k >= lo && k <= hi;
+  if (yP) {
+    // Max-OI reference: same session, current result only, dated.
+    const ov = oiView(), oc = ov && !ov.stale && ov.d.current;
+    if (oc && oc.is_shown_session && oc.top[0] && inR(oc.top[0].strike)) {
+      g.strokeStyle = "#d29922aa"; g.setLineDash([6, 4]);
+      g.beginPath(); g.moveTo(PAD.l, yP(oc.top[0].strike)); g.lineTo(W - PAD.r, yP(oc.top[0].strike)); g.stroke(); g.setLineDash([]);
+    }
+    // Spot, broken where a snapshot has no valid spot.
+    g.strokeStyle = "#58a6ff"; g.lineWidth = 1.5; g.beginPath();
+    let pen = false;
+    for (const p of placed) { if (!posNum(p.spot)) { pen = false; continue; }
+      pen ? g.lineTo(x(p.ms), yP(p.spot)) : g.moveTo(x(p.ms), yP(p.spot)); pen = true; }
+    g.stroke(); g.lineWidth = 1;
+    const day = latest && latest.session_date;
+    g.fillStyle = "#d29922";
+    for (const p of placed) if (posNum(p.spot) && day && p.newest_trade && String(p.newest_trade).slice(0, 10) < day) {
+      g.beginPath(); g.arc(x(p.ms), yP(p.spot), 2.2, 0, 7); g.fill(); }
+    // Strike steps: horizontal = last observed until the next snapshot; a
+    // vertical only between two in-range observations; nothing across an
+    // unavailable snapshot or a vanished sign; stop at the last observation.
+    const steps = (side, col) => {
+      let lastArrow = null;
+      placed.forEach((p, i) => {
+        const e = okP(p) ? p[side] : null;
+        if (!e) { lastArrow = null; return; }
+        const X = x(p.ms), n = placed[i + 1], ne = n && okP(n) ? n[side] : null;
+        if (inR(e.strike)) {
+          const Y = yP(e.strike);
+          g.strokeStyle = col;
+          if (ne) { g.beginPath(); g.moveTo(X, Y); g.lineTo(x(n.ms), Y);
+                    if (inR(ne.strike)) g.lineTo(x(n.ms), yP(ne.strike)); g.stroke(); }
+          if (nearTie(e)) { g.beginPath(); g.arc(X, Y, 2.2, 0, 7); g.stroke(); }
+          else { g.fillStyle = col; g.fillRect(X - 1, Y - 1, 2, 2); }
+          lastArrow = null;
+        } else if (yP && lastArrow !== e.strike) {          // off scale: arrow + value, once per run
+          const up = e.strike > hi, Y = up ? PAD.t + 3 : split - 3;
+          g.fillStyle = col; g.beginPath();
+          g.moveTo(X, Y + (up ? -3 : 3)); g.lineTo(X - 3, Y + (up ? 3 : -3)); g.lineTo(X + 3, Y + (up ? 3 : -3)); g.fill();
+          g.textAlign = "left"; g.fillText(String(e.strike), X + 4, Y + (up ? 8 : -2));
+          lastArrow = e.strike;
+        }
+      });
+    };
+    steps("max", "#3fb950"); steps("min", "#f85149");
+  }
+  // Unavailable snapshots, marked on both subplots.
+  g.fillStyle = "#8b949e"; g.textAlign = "center";
+  for (const p of placed) if (!okP(p)) { g.fillText("×", x(p.ms), split - 2); g.fillText("×", x(p.ms), r1 - 2); }
+  // GEX ratio 0..1, 0.5 = zero net gamma under the assumed sign.
+  const yR = r => r1 - r * (r1 - r0);
+  g.strokeStyle = "#21262d"; g.textAlign = "right"; g.fillStyle = "#8b949e";
+  for (const r of [0, 0.5, 1]) { g.beginPath(); g.moveTo(PAD.l, yR(r)); g.lineTo(W - PAD.r, yR(r)); g.stroke(); g.fillText(r.toFixed(1), PAD.l - 5, yR(r) + 3); }
+  g.strokeStyle = "#484f58"; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(PAD.l, yR(0.5)); g.lineTo(W - PAD.r, yR(0.5)); g.stroke(); g.setLineDash([]);
+  g.strokeStyle = "#a371f7"; g.lineWidth = 1.5; g.beginPath();
+  let pen = false;
+  for (const p of placed) { const r = okP(p) ? p.ratio : null;
+    if (r == null) { pen = false; continue; }
+    pen ? g.lineTo(x(p.ms), yR(r)) : g.moveTo(x(p.ms), yR(r)); pen = true; }
+  g.stroke(); g.lineWidth = 1;
+  g.fillStyle = "#8b949e"; g.textAlign = "left";
+  g.fillStyle = "#8b949e"; g.textAlign = "left"; wrapText(g, legend, PAD.l, 11, W - 68);
+  g.fillText("GEX ratio, all expiries (0.5 = zero net gamma)", PAD.l, r0 - 4);
+  g.fillText(tzTime(placed[0].t).slice(0, 5), PAD.l, H - PAD.b + 12);
+  drawCaption(g, cap, W, H, PAD.l, PAD.r);
+  g.fillStyle = "#8b949e"; g.font = "10px ui-monospace";
+  g.textAlign = "right"; g.fillText(tzTime(placed[placed.length-1].t).slice(0, 5) + " " + tzAt(new Date(t1)), W - PAD.r, H - PAD.b + 12);
+  return {placed, x, PAD, W, H};
+}
+
+const extTxt = (e, p, none, sign) => {
+  if (!e) return none || "none";
+  const val = GexMath.fmt(GexMath.gexIn(e.raw, p.spot, units), units);
+  return `${e.strike} (${e.dist == null ? "distance N/A" : pct1(e.dist) + " from spot"}) ${val} ${GexMath.UNITS[units].gexSfx}` +
+    (e.runner_up == null ? "" : ` · runner-up ${e.runner_up}, ${e.tied ? "EXACT TIE" : "gap " + (e.gap * 100).toFixed(1) + "%"}`);
+};
+
+function trackNote() {
+  const el = $("tracknote"), v = tracksView();
+  if (!v) { el.textContent = waiting(); return; }
+  const d = v.d, s = d.series, last = [...s].reverse().find(p => p.status === "ok");
+  const ov = oiView(), oc = ov && !ov.stale && ov.d.current;
+  const bad = s.filter(p => p.status !== "ok").length;
+  el.innerHTML =
+    (v.stale ? `<span class="warn">refreshing — computed for an earlier snapshot of this session</span><br>` : "") +
+    (d.transient ? `<span class="warn">some stored files could not be read; retrying</span><br>` : "") +
+    (last ? `Latest (${tzTime(last.t)}): max-gamma strike <b>${extTxt(last.max, last, last.max_none)}</b><br>` +
+            `min-gamma strike <b>${extTxt(last.min, last, last.min_none)}</b> · GEX ratio <b>${GexMath.fmtRatio(last.ratio)}</b>`
+          : "No usable snapshot yet this session.") +
+    (oc && oc.is_shown_session && oc.top[0] ? `<br>Dashed orange: front-expiry Max-OI strike ${oc.top[0].strike} from the snapshot saved ${tzStamp(oc.received_at)} — a daily reference, not the Max-OI strike at each moment.` : "") +
+    (bad ? `<br>${bad} snapshot(s) unavailable (×): lines are broken there, not joined.` : "") +
+    (d.n_unplaceable ? `<br>${d.n_unplaceable} snapshot(s) with unreadable metadata could not be placed in time.` : "") +
+    ex(howto("the strikes holding the most positive and the most negative net gamma, snapshot by snapshot, drawn against spot.") +
+      `Per snapshot, all expiries: net gamma per strike = calls − puts summed over expiries; the max-gamma strike is the most positive, the min-gamma strike the most negative ` +
+      `(our definition — GEXStream lists the feature without defining it). Global across all strikes; ties go nearer spot, then lower strike. ` +
+      `A horizontal segment is the last observed value until the next snapshot, not a continuous measurement. ` +
+      `○ = runner-up within ${NEAR_TIE * 100}% or an exact tie (a display heuristic, not significance). ` +
+      `Descriptive only: calls +, puts − is an assumed dealer sign, and an extremum is not a magnet or a pin.`);
+}
+
+// ---- Intraday GEX heatmap (step 5; server: TracksCache -> /api/heat) ----------
+// A cell = the tracks' n_k (calls − puts at that strike, summed over ALL
+// expiries) for one stored snapshot, from the same server-side netting pass.
+// Design checked (2026-10-01): one colour cap for both zoom levels
+// (session-to-date p99 of |value| over the whole transmitted ±12% grid, in the
+// chosen unit), linear intensity, "no data" hatched and never drawn as zero, a
+// column holds its value until the next snapshot but never across a gap and
+// never past its own time at the right edge. Pure parts in web/gexmath.js.
+let heat = null, heatKey = null, heatBusy = false, heatRetryAt = 0, heatLoads = 0, heatCapMemo = null, heatImg = null;
+let heatFull = false;
+try { heatFull = localStorage.getItem("gex.heatfull") === "1"; } catch (e) {}
+const HEAT_RAMP = GexMath.heatRamp();
+const HEAT_ZOOM = 0.03;                 // default rows: ±3% around the session's spot range
+const HEAT_NOMINAL_MS = 60000;          // the collector's poll interval (collector.py --interval)
+async function loadHeat() {
+  if (heatBusy) return;
+  heatBusy = true;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);
+  try {
+    const r = await fetch(api("/api/heat"), {signal: ctl.signal});
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!latest || d.poll_key !== latest.poll_key) return;
+    heat = d; heatLoads++; heatCapMemo = null;
+    heatKey = d.poll_key;                       // deadlines as for the tracks
+    heatRetryAt = Date.now() + (d.transient ? 10000 : 60000);
+    drawAll();
+  } catch (e) {}
+  finally { clearTimeout(timer); heatBusy = false; }
+}
+setInterval(() => { if (latest && (heatKey !== latest.poll_key || (heatRetryAt && Date.now() >= heatRetryAt))) loadHeat(); }, 10000);
+
+function heatView() {
+  if (!heat || !latest || heat.session_date !== latest.session_date) return null;
+  return {d: heat, stale: heat.poll_key !== latest.poll_key};
+}
+// Values usable in the chosen unit: dollars need that column's own valid spot.
+const heatVals = c => Array.isArray(c.values) && (units === "raw" || posNum(c.spot)) ? c.values : null;
+let heatHatchTile = null;
+function heatHatch(g) {
+  if (!heatHatchTile) {
+    const c = document.createElement("canvas"); c.width = c.height = 6;
+    const h = c.getContext("2d");
+    h.fillStyle = "#161b22"; h.fillRect(0, 0, 6, 6);          // OPAQUE: a hatch must cover what is under it
+    h.strokeStyle = "#3a414b"; h.lineWidth = 1;
+    h.beginPath(); h.moveTo(0, 6); h.lineTo(6, 0); h.moveTo(-1, 1); h.lineTo(1, -1); h.moveTo(5, 7); h.lineTo(7, 5); h.stroke();
+    heatHatchTile = c;
+  }
+  return g.createPattern(heatHatchTile, "repeat");
+}
+
+function drawHeat(cv) {
+  const v = heatView();
+  const dpr = devicePixelRatio || 1;
+  const key = v && [v.d.poll_key, heatLoads, units, heatFull, cv.clientWidth, cv.clientHeight, dpr, tzId(), latest.session_date].join("|");
+  if (key && heatImg && heatImg.key === key) {      // hover repaints: blit, don't redraw ~20-80k cells
+    const {g} = fit(cv);
+    g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(heatImg.canvas, 0, 0); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return heatImg.ctx;
+  }
+  const {g, W, H} = fit(cv);
+  g.fillStyle = "#8b949e"; g.font = "10px ui-monospace"; g.textAlign = "center";
+  if (!v) { g.fillText(waiting(), W/2, H/2); return null; }
+  const ks = v.d.strikes || [];
+  const cols = (v.d.columns || []).filter(c => toDate(c.t)).map(c => ({...c, ms: +toDate(c.t)})).sort((a, b) => a.ms - b.ms);
+  if (!cols.length || !ks.length) { g.fillText(v.d.reason || "no stored snapshot this session", W/2, H/2); return null; }
+  const med = GexMath.median(cols.slice(1).map((c, i) => c.ms - cols[i].ms));
+  const maxGap = Math.min(3 * (med || HEAT_NOMINAL_MS), 3 * HEAT_NOMINAL_MS);
+  const spans = GexMath.heatSpans(cols.map(c => c.ms), maxGap);
+  const memo = `${v.d.poll_key}|${heatLoads}|${units}`;
+  if (!heatCapMemo || heatCapMemo.key !== memo) heatCapMemo = {key: memo, ...GexMath.heatCap(cols, units)};
+  const {cap, rule} = heatCapMemo;
+  const ruleTxt = rule === "max" ? "the largest |net| (fewer than 1% of cells are non-zero, so the 99th percentile is 0)"
+    : rule === "all zero" ? "every value is zero" : "session-to-date 99th percentile of |net|";
+  // Rows shown. The zoom is a view of the transmitted grid: the colour cap is NOT recomputed for it.
+  const spots = cols.filter(c => Array.isArray(c.values) && posNum(c.spot)).map(c => c.spot);
+  let lo = ks[0], hi = ks[ks.length - 1];
+  if (!heatFull && spots.length) { lo = Math.max(lo, Math.min(...spots) * (1 - HEAT_ZOOM)); hi = Math.min(hi, Math.max(...spots) * (1 + HEAT_ZOOM)); }
+  const rows = [];
+  ks.forEach((k, i) => { if (k >= lo && k <= hi) rows.push({k, i}); });
+  if (!rows.length) { g.fillText("no strike inside the zoomed window", W/2, H/2); return null; }
+  rows.forEach((r, j) => {                        // band: half-way to each neighbouring strike
+    const p = rows[j - 1], n = rows[j + 1];
+    const dn = p ? (r.k - p.k) / 2 : n ? (n.k - r.k) / 2 : 0.5, up = n ? (n.k - r.k) / 2 : dn;
+    r.lo = r.k - dn; r.hi = r.k + up;
+  });
+  const yLo = rows[0].lo, yHi = rows[rows.length - 1].hi;
+  // Legend (always visible): colour bar with the cap, then what every mark means.
+  const BAR = 150;
+  const capTxt = cap == null ? "—" : GexMath.fmt(cap, units).replace(/^[+−]/, "");
+  const legend = `blue = net positive (calls > puts) · red = net negative · grey ≈ 0 · hatched = no data · × snapshot unavailable · ● mixed-age · white line = spot · ` +
+    `colour cap ${capTxt}: ${ruleTxt} (brighter values saturate)`;
+  g.font = "10px ui-monospace";
+  const lines = wrapLines(g, legend, W - 58 - 10 - BAR - 14);
+  const cap2 = `times = when received · ${lagNote(v.d.median_lag_s)}`;
+  const PAD = {t: 10 + Math.max(lines.length * 11, 24), b: 21 + captionHeight(g, cap2, W, 58, 10), l: 58, r: 10};
+  for (let i = 0; i <= 2 * HEAT_RAMP.steps; i++) {
+    const s = i - HEAT_RAMP.steps;
+    g.fillStyle = s < 0 ? HEAT_RAMP.neg[-s] : HEAT_RAMP.pos[s];
+    g.fillRect(PAD.l + i * BAR / (2 * HEAT_RAMP.steps + 1), 4, BAR / (2 * HEAT_RAMP.steps + 1) + 0.5, 8);
+  }
+  g.fillStyle = "#8b949e"; g.textAlign = "left"; g.fillText(`−${capTxt}`, PAD.l, 22);
+  g.textAlign = "center"; g.fillText("0", PAD.l + BAR / 2, 22);
+  g.textAlign = "right"; g.fillText(`+${capTxt}`, PAD.l + BAR, 22);
+  g.textAlign = "left"; lines.forEach((l, i) => g.fillText(l, PAD.l + BAR + 14, 11 + i * 11));
+  // Plot. Background = "no data" (hatched): gaps, absent strikes and unavailable columns all read as missing.
+  const t0 = cols[0].ms, t1 = cols[cols.length - 1].ms;
+  const x = ms => PAD.l + (t1 > t0 ? (ms - t0) / (t1 - t0) : 0.5) * (W - PAD.l - PAD.r);
+  const y = p => PAD.t + (yHi - p) / (yHi - yLo) * (H - PAD.t - PAD.b);
+  g.fillStyle = heatHatch(g); g.fillRect(PAD.l, PAD.t, W - PAD.l - PAD.r, H - PAD.t - PAD.b);
+  // Whole-pixel columns painted in time order; the tooltip uses the same owner
+  // rule (GexMath.heatOwner: the latest snapshot covering a pixel). "No data"
+  // is PAINTED (hatch), not skipped, so an earlier column can't show through.
+  const day = latest && latest.session_date;
+  const geo = GexMath.heatGeometry(spans.map(([a, b]) => [x(a), x(b)]), 2, PAD.l, W - PAD.r);
+  GexMath.heatRowPixels(rows, y);
+  const vis = GexMath.heatVisible(geo), hidden = cols.length - vis.size;
+  const thinRows = rows.filter(r => r.bottom <= r.top).length;
+  const hatchFill = heatHatch(g);
+  let sat = 0, shown = 0, unav = 0, mixed = 0;                 // counts: VISIBLE cells only
+  cols.forEach((c, i) => {
+    const [xa, xb] = geo[i], vals = heatVals(c), seen = vis.has(i);
+    if (!vals) { unav++; g.fillStyle = hatchFill; g.fillRect(xa, PAD.t, xb - xa, H - PAD.t - PAD.b); return; }
+    for (const r of rows) {
+      if (r.bottom <= r.top) continue;
+      const val = GexMath.gexIn(vals[r.i], c.spot, units);
+      g.fillStyle = val === null ? hatchFill : GexMath.heatColor(val, cap, HEAT_RAMP);   // null: absent strike
+      g.fillRect(xa, r.top, xb - xa, r.bottom - r.top);
+      if (val !== null && seen) { shown++; if (cap > 0 && Math.abs(val) > cap) sat++; }
+    }
+  });
+  // Spot: white with a dark halo, broken across gaps, invalid spots and the window edge.
+  const spotPath = () => { g.beginPath(); let pen = false;
+    cols.forEach((c, i) => {
+      if (!posNum(c.spot) || c.spot < yLo || c.spot > yHi) { pen = false; return; }
+      pen ? g.lineTo(x(c.ms), y(c.spot)) : g.moveTo(x(c.ms), y(c.spot));
+      pen = spans[i][1] > spans[i][0];
+    }); };
+  g.strokeStyle = "#0d1117"; g.lineWidth = 3.5; spotPath(); g.stroke();
+  g.strokeStyle = "#e6edf3"; g.lineWidth = 1.5; spotPath(); g.stroke(); g.lineWidth = 1;
+  // Unavailable (×, at the top edge) and mixed-age (●, just above it) snapshots.
+  g.font = "10px ui-monospace"; g.textAlign = "center";
+  cols.forEach((c, i) => {
+    const xm = (geo[i][0] + geo[i][1]) / 2;
+    if (!heatVals(c)) { g.fillStyle = "#e6edf3"; g.fillText("×", xm, PAD.t + 9); }
+    if (day && c.newest_trade && String(c.newest_trade).slice(0, 10) < day) {
+      mixed++; g.fillStyle = "#d29922"; g.beginPath(); g.arc(xm, PAD.t - 3, 2, 0, 7); g.fill(); }
+  });
+  // Axes: strikes on the left, first and last receipt time below.
+  g.fillStyle = "#8b949e"; g.strokeStyle = "#484f58"; g.textAlign = "right";
+  for (const k of niceTicks(yLo, yHi, 8)) { if (k < yLo || k > yHi) continue;
+    g.beginPath(); g.moveTo(PAD.l - 4, y(k)); g.lineTo(PAD.l, y(k)); g.stroke(); g.fillText(String(k), PAD.l - 6, y(k) + 3); }
+  g.textAlign = "left"; g.fillText(tzTime(cols[0].t).slice(0, 5), PAD.l, H - PAD.b + 12);
+  g.textAlign = "right"; g.fillText(tzTime(cols[cols.length - 1].t).slice(0, 5) + " " + tzAt(toDate(cols[cols.length - 1].t) || new Date()), W - PAD.r, H - PAD.b + 12);
+  drawCaption(g, cap2, W, H, PAD.l, PAD.r);
+  const ctx = {PAD, W, H, cols, geo, rows, x, y, cap, rule, sat, shown, unav, mixed, hidden, thinRows, maxGap};
+  const off = document.createElement("canvas"); off.width = cv.width; off.height = cv.height;
+  off.getContext("2d").drawImage(cv, 0, 0);
+  heatImg = {key, canvas: off, ctx};
+  return ctx;
+}
+
+function heatNote() {
+  const el = $("heatnote"), v = heatView();
+  if (!v) { el.textContent = waiting(); return; }
+  const c = heatCtx;
+  const head = (v.stale ? `<span class="warn">refreshing — computed for an earlier snapshot of this session</span><br>` : "") +
+    (v.d.transient ? `<span class="warn">some stored files could not be read; retrying</span><br>` : "");
+  if (!c) { el.innerHTML = head + (v.d.reason || "no heatmap for this session yet"); return; }
+  const capTxt = c.cap == null ? "unavailable (no value in this unit)" : c.rule === "all zero" ? "0 — every value is zero"
+    : `±${GexMath.fmt(c.cap, units).replace(/^[+−]/, "")} ${GexMath.UNITS[units].gexSfx}` +
+      (c.rule === "max" ? " — the largest |net|, because fewer than 1% of cells are non-zero" : "");
+  const last = c.cols[c.cols.length - 1];
+  el.innerHTML = head +
+    `${c.cols.length} snapshots to ${tzTime(last.t)} · strikes ${c.rows[0].k}–${c.rows[c.rows.length - 1].k} ` +
+    `(${heatFull ? "full ±12% window" : "zoomed: ±3% around the session's spot range"}) · colour cap ${capTxt}, ` +
+    `session-to-date autoscale · ${c.sat} of ${c.shown} visible cells are above it (saturated)` +
+    (c.hidden ? `<br>${c.hidden} snapshot(s) are narrower than a pixel at this width and sit behind later ones (not counted above) — the tooltip shows the one drawn.` : "") +
+    (c.thinRows ? `<br>${c.thinRows} strike row(s) are thinner than a pixel at this size and are not drawn — zoom in.` : "") +
+    (c.unav ? `<br>${c.unav} snapshot(s) unavailable (×)${units === "raw" ? "" : " — this includes any without a valid spot, which have no dollar values"}.` : "") +
+    (c.mixed ? `<br><span class="warn">${c.mixed} mixed-age snapshot(s) (●): saved before the session's first trade, so their greeks are the previous session's.</span>` : "") +
+    (v.d.n_unplaceable ? `<br>${v.d.n_unplaceable} snapshot(s) with unreadable metadata could not be placed in time.` : "") +
+    ex(howto("each column is one stored snapshot and each row a strike; the colour is that strike's net gamma (calls − puts, all expiries). " +
+             "Bright bands show where gamma is concentrated and how that changes as spot moves through the session.") +
+      `The same per-strike net as the gamma tracks above: a column's max- and min-gamma strikes are among its strongest cells when they lie inside the rows shown, but saturation and the colour steps mean colour alone cannot rank them — the tracks and the tooltip give exact values. ` +
+      `Calls +, puts − is an assumed dealer sign: descriptive, not a forecast. Stored open interest normally stays unchanged intraday, so changes mainly reflect revaluation as spot, time and IV move. ` +
+      `A column holds its snapshot's value until the next one, up to ${Math.round(c.maxGap / 60000)} min (a longer pause is a hatched gap); the last column is not extended past its own time. ` +
+      `Intensity is linear in |net| up to the cap — one cap for both zoom levels, recomputed as snapshots arrive, so the same value can be drawn differently later in the day. ` +
+      `$ values use each snapshot's own spot. Blue/red instead of the page's call green: here the sign is carried by colour alone, and green/red is hard to tell apart with the commonest colour blindness.`);
+}
+
+(function initHeatCtl() {
+  const el = $("heatctl");
+  const draw = () => {
+    el.innerHTML = "";
+    const b = document.createElement("button");
+    b.className = heatFull ? "on" : ""; b.textContent = heatFull ? "full range (±12%)" : "zoomed (±3%)";
+    b.title = "which strikes are shown; the colour scale is the same in both";
+    b.onclick = () => { heatFull = !heatFull; try { localStorage.setItem("gex.heatfull", heatFull ? "1" : "0"); } catch (e) {} draw(); drawAll(); };
+    el.appendChild(b);
+  };
+  draw();
+})();
+
+// ---- IV term structure (server: TermCache, gex/ivterm.py) ----------------------
+// GEXStream's fixed-delta term structure; IV Ratio / Net IV deferred on
+// measurement (see ivterm.py). Ended expiries are dropped by the CLOCK here.
+let term = null, termKey = null, termBusy = false, termRetryAt = 0;
+async function loadTerm() {
+  if (termBusy) return;
+  termBusy = true;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 15000);
+  try {
+    const r = await fetch(api("/api/term"), {signal: ctl.signal});
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!latest || d.poll_key !== latest.poll_key) return;
+    term = d; termKey = d.poll_key;
+    termRetryAt = Date.now() + (d.transient ? 10000 : 60000);
+    drawAll();
+  } catch (e) {}
+  finally { clearTimeout(timer); termBusy = false; }
+}
+setInterval(() => { if (latest && (termKey !== latest.poll_key || (termRetryAt && Date.now() >= termRetryAt))) loadTerm(); }, 10000);
+function termView() {
+  if (!term || !latest || term.session_date !== latest.session_date) return null;
+  return {d: term, stale: term.poll_key !== latest.poll_key};
+}
+const TERM_COLORS = {"50Δ call": "#58a6ff", "25Δ call": "#3fb950", "10Δ call": "#7ee787",
+                     "25Δ put": "#f85149", "10Δ put": "#ffa198"};
+const termLive = d => (d.expiries || []).filter(e => Date.now() < Date.parse(e.close_utc));
+// x position: fractional days from the snapshot to the series' SETTLEMENT
+// (server `days`), so an AM and a PM series on one date sit apart instead of
+// stacking on one integer-DTE column; older responses fall back to dte.
+const termX = e => e.days != null ? Math.max(0, e.days) : e.dte;
+
+function drawTerm(cv) {
+  const {g,W,H} = fit(cv);
+  const v = termView();
+  g.fillStyle = "#8b949e"; g.font = "10px ui-monospace"; g.textAlign = "center";
+  if (!v) { g.fillText(waiting(), W/2, H/2); return null; }
+  if (!v.d.available) { g.fillText(v.d.reason || "unavailable", W/2, H/2); return null; }
+  const exps = termLive(v.d), T = v.d.targets;
+  if (!exps.length) { g.fillText("no expiry with options still trading in this snapshot", W/2, H/2); return null; }
+  g.textAlign = "left";
+  const legend = T.map(t => `■ ${t}`).join("   ") + "   (points = observed expiries; no line across an unavailable value" +
+    (exps.some(e => e.settle === "AM") ? "; dashed = AM-settled SPX, never joined to PM" : "") + ")";
+  const legendH = wrapLines(g, legend, W - 62).length * 11;
+  const cap = "days to expiry — SQUARE-ROOT scale (short expiries spread out)";
+  const PAD = {t: 10 + legendH, b: 21 + captionHeight(g, cap, W, 52, 10), l: 52, r: 10};
+  const split = PAD.t + (H - PAD.t - PAD.b) * 0.7, s0 = split + 18, s1 = H - PAD.b;
+  const maxD = Math.max(1, ...exps.map(termX));
+  const x = d => PAD.l + Math.sqrt(Math.max(0, d)) / Math.sqrt(maxD) * (W - PAD.l - PAD.r);
+  // legend in each line's colour
+  let lx = PAD.l, ly = 11;
+  for (const t of T) {
+    const txt = `■ ${t}   `, w = g.measureText(txt).width;
+    if (lx + w > W - 10) { lx = PAD.l; ly += 11; }
+    g.fillStyle = TERM_COLORS[t]; g.fillText(txt, lx, ly); lx += w;
+  }
+  const ivs = exps.flatMap(e => T.map(t => e.values[t].iv).filter(z => z != null)).map(z => z * 100);
+  if (!ivs.length) { g.textAlign = "center"; g.fillStyle = "#8b949e"; g.fillText("no fixed-delta value available", W/2, H/2); return null; }
+  let lo = Math.min(...ivs), hi = Math.max(...ivs); const pad = Math.max(0.5, (hi - lo) * 0.08); lo -= pad; hi += pad;
+  const y = z => PAD.t + (hi - z) / (hi - lo) * (split - PAD.t);
+  g.strokeStyle = "#21262d"; g.fillStyle = "#8b949e"; g.textAlign = "right";
+  for (const t of niceTicks(lo, hi, 5)) { g.beginPath(); g.moveTo(PAD.l, y(t)); g.lineTo(W - PAD.r, y(t)); g.stroke();
+    g.fillText(`${Number(t.toPrecision(6))}%`, PAD.l - 5, y(t) + 3); }
+  g.textAlign = "center";
+  for (const d of [0, 1, 2, 5, 7, 14, 30, 60, 90, 180, 365, 730]) if (d <= maxD) {
+    g.strokeStyle = "#21262d"; g.beginPath(); g.moveTo(x(d), PAD.t); g.lineTo(x(d), s1); g.stroke();
+    g.fillStyle = "#8b949e"; g.fillText(`${d}d`, x(d), s1 + 12); }
+  if (exps[0].dte === 0) {                       // 0DTE identified: timing near expiry moves it most
+    g.fillStyle = "#d29922"; g.fillText("0DTE", x(0) + 14, PAD.t + 10);
+  }
+  // One path per ROOT: an AM series is only ever joined to the next AM one.
+  const roots = [...new Set(exps.map(e => e.root ?? ""))];
+  for (const t of T) {
+    g.strokeStyle = TERM_COLORS[t]; g.fillStyle = TERM_COLORS[t]; g.lineWidth = 1.5;
+    for (const rt of roots) {
+      const ser = exps.filter(e => (e.root ?? "") === rt);
+      g.setLineDash(ser[0] && ser[0].settle === "AM" ? [4, 3] : []);
+      ser.forEach((e, i) => {
+        const a = e.values[t].iv, n = ser[i + 1], b = n && n.values[t].iv;
+        if (a == null) return;
+        if (b != null) { g.beginPath(); g.moveTo(x(termX(e)), y(a * 100)); g.lineTo(x(termX(n)), y(b * 100)); g.stroke(); }
+        g.beginPath(); g.arc(x(termX(e)), y(a * 100), 2, 0, 7); g.fill();
+      });
+    }
+    g.setLineDash([]);
+    g.lineWidth = 1;
+  }
+  // 25Δ skew strip (vol points)
+  const sk = exps.map(e => e.skew_25.vol_pts).filter(z => z != null);
+  g.fillStyle = "#8b949e"; g.textAlign = "left"; g.fillText("25Δ put IV − 25Δ call IV (vol points)", PAD.l, s0 - 4);
+  if (sk.length) {
+    let a = Math.min(0, ...sk), b = Math.max(0, ...sk); if (a === b) b = a + 1;
+    const ys = z => s1 - (z - a) / (b - a) * (s1 - s0);
+    g.strokeStyle = "#484f58"; g.beginPath(); g.moveTo(PAD.l, ys(0)); g.lineTo(W - PAD.r, ys(0)); g.stroke();
+    g.textAlign = "right";                       // signed ticks over the full range (negative skew too)
+    for (const t of niceTicks(a, b, 3)) g.fillText(t === 0 ? "0" : `${t > 0 ? "+" : "−"}${Number(Math.abs(t).toPrecision(3))}`, PAD.l - 5, ys(t) + 3);
+    for (const e of exps) { const z = e.skew_25.vol_pts; if (z == null) continue;
+      g.fillStyle = z >= 0 ? "#f85149aa" : "#3fb950aa"; g.fillRect(x(termX(e)) - 1.5, Math.min(ys(0), ys(z)), 3, Math.abs(ys(z) - ys(0))); }
+  }
+  drawCaption(g, cap, W, H, PAD.l, PAD.r);
+  return {exps, x, PAD, W, H};
+}
+
+function termNote() {
+  const el = $("termnote"), v = termView();
+  if (!v) { el.textContent = waiting(); return; }
+  if (!v.d.available) { el.textContent = v.d.reason || "unavailable"; return; }
+  const exps = termLive(v.d), all = v.d.expiries || [];
+  const unav = {}; let nun = 0;
+  for (const e of exps) for (const t of v.d.targets) { const x = e.values[t]; if (x.iv == null) { nun++; const r = x.reason.split(" (")[0]; unav[r] = (unav[r] || 0) + 1; } }
+  const src = [...new Set(exps.map(e => e.delta_source))].join("; ");
+  const mixed = v.d.newest_trade && v.d.session_date && String(v.d.newest_trade).slice(0, 10) < v.d.session_date;
+  el.innerHTML =
+    (v.stale ? `<span class="warn">refreshing — computed for an earlier snapshot of this session</span><br>` : "") +
+    (mixed ? `<span class="warn">This result's snapshot was saved before that session's first trade: its IVs and deltas are the previous session's.</span><br>` : "") +
+    `${exps.length} expiries shown${all.length > exps.length ? ` (${all.length - exps.length} whose options trading has ended hidden)` : ""}; ` +
+    `${nun} value(s) unavailable${nun ? ` (${Object.entries(unav).map(([k, n]) => `${n} ${k}`).join(", ")})` : ""}.` +
+    (exps.some(e => e.delta_source !== "stored per-contract (v3)") ? `<br>Deltas: ${src}.` : "") +
+    ex(howto("implied volatility by expiry at fixed deltas, one line per delta. Differences between expiries can reflect event pricing, among other causes.") +
+      `CBOE model IV at fixed deltas, interpolated linearly in delta between the two bracketing quote-valid contracts ` +
+      `(two-sided quote, spread ≤ 20% of mid), never extrapolated; a bracket wider than 0.15 delta or 3% of spot is refused. ` +
+      `<b>50Δ = the 50-delta CALL</b> (GEXStream's "ATM (50Δ)"). Deltas: ${src}.<br>` +
+      `Skew = 25Δ put IV − 25Δ call IV in the same expiry and snapshot: positive means the put wing carries the higher IV — not buying pressure or a forecast. ` +
+      `HV30/HV60 (GEXStream's reference lines): not shown yet — they need 31/61 verified regular-session closes. ` +
+      `IV Ratio / Net IV (GEXStream): deferred — on our data they flip between “puts richer” and “calls richer” depending on which contracts are eligible, a rule GEXStream does not publish (gex/ivterm.py has the measurements).`);
+}
+
+function oiWallNote() {
+  const el = $("oiwallnote"), v = oiView();
+  if (!v) { el.textContent = waiting(); return; }
+  const d = v.d, cur = d.current;
+  const shown = d.sessions.find(s => s.date === d.shown_session);
+  const why = !shown ? "" : shown.status === "gap" ? `has no live snapshot yet (${shown.reason})`
+    : `${shown.status}: ${shown.reason}`;
+  const readIssues = d.sessions.filter(s => s.unreadable_skipped)
+    .map(s => `${s.date} (${s.unreadable_skipped} unreadable snapshot(s)${s.status === "ok" ? ", fell back to an earlier one" : ""})`);
+  const head = (v.stale ? `<span class="warn">refreshing — computed for an earlier snapshot of this session</span><br>` : "") +
+    (d.transient ? `<span class="warn">some stored files could not be read; retrying</span><br>` : "");
+  if (!cur) { el.innerHTML = head + `No stored session with valid open interest yet${why ? ` — the session on screen ${why}` : ""}.`; return; }
+  const ch = cur.change || {};
+  const chTxt = ch.available
+    ? `${ch.abs >= 0 ? "+" : "−"}${fmtN(Math.abs(ch.abs))} contracts (${pct1(ch.pct)}) vs expiry ${ch.expiry} in the ${ch.baseline_session} snapshot (${fmtN(ch.baseline)})`
+    : `unavailable — ${ch.reason}`;
+  const gaps = d.sessions.filter(s => s.status !== "ok").map(s => `${s.date} (${s.reason})`);
+  const clos = (d.closures || []).map(c => `${c.date} ${c.name}${c.stored_polls ? ` (${c.stored_polls} stale snapshots stored, excluded)` : ""}`);
+  el.innerHTML =
+    head + `<b>${cur.date}</b>${cur.is_shown_session ? "" : ` <span class="warn">— the session on screen (${d.shown_session}) ${why}; this is the last session with valid open interest</span>`}` +
+    ` · front expiry ${cur.front_label || cur.front_expiry} (${cur.labels.join(", ")}) · total ${fmtN(cur.total_oi)} (calls ${fmtN(cur.call_oi)}, puts ${fmtN(cur.put_oi)}) across ${cur.n_strikes} strikes<br>` +
+    (cur.front_expiry === cur.date && frontEnded(cur) && latest && cur.date === latest.session_date
+      ? `<span class="warn">Options trading for expiry ${cur.front_label || cur.front_expiry} has ended; these are its last stored figures.</span> ` +
+        (cur.next_expiry ? `Next stored expiry: ${cur.next_label || cur.next_expiry} (current stored OI ${cur.next_total_oi == null ? "unavailable" : fmtN(cur.next_total_oi)} contracts).` : "") + `<br>` : "") +
+    (!cur.top.length ? `Max OI: none (${(cur.problems || []).join("; ") || "no strikes"})`
+      : cur.top_near && cur.top_near.length && cur.top_near[0].strike === cur.top[0].strike
+        ? `Max OI (within ±12% of this snapshot's spot, and over all strikes): <b>${topTxt(cur.top[0])}</b>` +
+          `<br>Top 3 within ±12%: ${cur.top_near.map(topTxt).join("; ")} · top 3 over all strikes: ${cur.top.map(topTxt).join("; ")}`
+        : (cur.top_near && cur.top_near.length
+            ? `Max OI within ±12% of this snapshot's spot: <b>${topTxt(cur.top_near[0])}</b> · top 3: ${cur.top_near.map(topTxt).join("; ")}<br>`
+            : `Max OI within ±12% of spot: unavailable (no valid spot or no strike in the window)<br>`) +
+          `Max OI over all strikes (GEXStream's definition): <b>${topTxt(cur.top[0])}</b> · top 3: ${cur.top.map(topTxt).join("; ")}`) +
+    `<br>OI change (same expiry, previous trading session): ${chTxt} · OI snapshot saved ${tzStamp(cur.received_at)}` +
+    (readIssues.length ? `<br><span class="warn">Read problems: ${readIssues.join("; ")}.</span>` : "") +
+    (gaps.length ? `<br>${gaps.length} session(s) not captured or not usable (dates under explanations).` : "") +
+    ex(howto("open contracts in the nearest expiry by strike (left), and each session's spot and largest-OI strike (right) — where contracts are concentrated, not who holds them or what price will do.") +
+      `Large OI concentrations can lie far from spot. The within-±12% ranking uses each snapshot's own spot, so it can change when spot moves even though OI does not.<br>` +
+      `CBOE-reported open interest, normally the previous settlement. ` +
+      `Per-strike OI = calls + puts, front expiry only (GEXStream's definitions); descriptive — it says nothing about who holds the contracts or whether they were bought or sold. ` +
+      `GEXStream's “OI Chg%” compares the front chains of different expiries (a different one every session here), so it is not shown. A stored zero may be a missing value.` +
+      (gaps.length ? `<br>Not captured or not usable: ${gaps.join("; ")}.` : "") +
+      (clos.length ? `<br>Market closed: ${clos.join("; ")}.` : ""));
+}
+
+// A smile series: one (expiry, root). SPX lists an AM- and a PM-settled series
+// on the same date; they are never merged, so everything
+// keys on the server's series id and labels say AM/PM where it applies.
+const smileLabel = e => `${e.expiry.slice(5).replace("-", "/")}${e.settle ? " " + e.settle : ""}`;
+// Settled by its OWN clock (AM at the open, SPXW at 16:00 / 13:00 early),
+// not the session close; older responses without settles_utc fall back.
+const seriesEnded = e => e.settles_utc ? Date.now() >= Date.parse(e.settles_utc)
+                                       : expiringEnded() && e.dte === 0;
+// An expiry keeps its colour while it stays selected (audit F6: colouring by
+// position in the selection recoloured every later curve on a deselect).
+const smileColorOf = new Map();
+function smileColor(expiry) {
+  for (const e of [...smileColorOf.keys()]) if (!smileSel || !smileSel.has(e)) smileColorOf.delete(e);
+  if (!smileColorOf.has(expiry)) {
+    const used = new Set(smileColorOf.values());
+    smileColorOf.set(expiry, SMILE_COLORS.find(c => !used.has(c)) || SMILE_COLORS[smileColorOf.size % SMILE_COLORS.length]);
+  }
+  return smileColorOf.get(expiry);
+}
+
+function renderSmileControls() {
+  const el = $("smilectl"); el.innerHTML = "";
+  // Chips render whenever expiries exist -- even if none has a drawable
+  // point -- so their "0 kept" diagnostics stay visible.
+  if (!smile || !(smile.expiries || []).length) return;
+  for (const e of smile.expiries) {
+    const b = document.createElement("button");
+    const on = !!smileSel && smileSel.has(e.id);
+    b.className = "exp" + (on ? " on" : "");
+    const over = seriesEnded(e);
+    b.textContent = `${smileLabel(e)} (${over ? "settled" : e.dte + "d"})` + (e.retained ? "" : " · 0 kept");
+    if (on) { b.style.borderLeftColor = smileColor(e.id); b.style.background = "#1f2937"; }
+    b.title = (over ? "this series has settled -- its quotes are the last stored ones; " : "") + `kept ${e.retained}; excluded ${Object.entries(e.excluded || {}).map(([k, v]) => v + " " + k).join(", ") || "none"}`;
+    b.onclick = () => { if (!smileSel) smileSel = new Set();
+                        smileSel.has(e.id) ? smileSel.delete(e.id) : smileSel.add(e.id);
+                        renderSmileControls(); drawAll(); };
+    el.appendChild(b);
+  }
+  const f = document.createElement("button");
+  f.className = smileFull ? "on" : ""; f.textContent = smileFull ? "full range" : "zoomed";
+  f.title = "zoomed: each expiry's 2nd-98th percentile, clipped points marked; full: everything";
+  f.onclick = () => { smileFull = !smileFull; renderSmileControls(); drawAll(); };
+  el.appendChild(f);
+}
+
+function smileChart(cv) {
+  const {g, W, H} = fit(cv);
+  const note = $("smilenote");
+  if (!smile || !latest || smile.poll_key !== latest.poll_key) { note.textContent = waiting(); return null; }
+  if (!smile.available || !smileSel) {
+    const tot = {};
+    for (const e of smile.expiries || [])
+      for (const [k, v] of Object.entries(e.excluded || {})) tot[k] = (tot[k] || 0) + v;
+    const why = Object.entries(tot).map(([k, v]) => `${v} ${k}`).join(", ");
+    note.textContent = (smile.reason || "no smile for this snapshot") +
+      (why ? ` — excluded across ${smile.expiries.length} expiries: ${why}` : "") +
+      (smile.available && !smileSel ? " — pick an expiry above" : "");
+    return null;
+  }
+  const chosen = smile.expiries.filter(e => smileSel.has(e.id));
+  const series = chosen.filter(e => e.points.length);
+  const empty = chosen.filter(e => !e.points.length);
+  if (!series.length) {
+    note.textContent = chosen.length ? "selected expiries have no quote-valid points: " +
+      empty.map(e => `${smileLabel(e)} (${Object.entries(e.excluded).map(([k, v]) => v + " " + k).join(", ")})`).join("; ")
+      : "no expiry selected";
+    return null;
+  }
+  const PAD = {t: 12, b: 24, l: 52, r: 12};
+  const q = (a, p) => { const b = [...a].sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.round(p * (b.length - 1)))]; };
+  let lo = Infinity, hi = -Infinity, kmin = Infinity, kmax = -Infinity;
+  for (const e of series) {
+    const ivs = e.points.map(p => p[1]);
+    lo = Math.min(lo, smileFull ? Math.min(...ivs) : q(ivs, 0.02));
+    hi = Math.max(hi, smileFull ? Math.max(...ivs) : q(ivs, 0.98));
+    kmin = Math.min(kmin, e.points[0][0]); kmax = Math.max(kmax, e.points[e.points.length - 1][0]);
+  }
+  if (hi - lo < 0.01) { lo -= 0.005; hi += 0.005; }
+  const pad = (hi - lo) * 0.06; lo = Math.max(0, lo - pad); hi += pad;
+  const x = k => PAD.l + (k - kmin) / Math.max(1e-9, kmax - kmin) * (W - PAD.l - PAD.r);
+  const y = v => PAD.t + (hi - v) / (hi - lo) * (H - PAD.t - PAD.b);
+  const yc = v => Math.max(PAD.t, Math.min(H - PAD.b, y(v)));
+  g.font = "10px ui-monospace"; g.fillStyle = "#8b949e"; g.strokeStyle = "#21262d";
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4;
+    g.beginPath(); g.moveTo(PAD.l, y(v)); g.lineTo(W - PAD.r, y(v)); g.stroke();
+    g.textAlign = "right"; g.fillText((v * 100).toFixed(1) + "%", PAD.l - 5, y(v) + 3);
+  }
+  g.textAlign = "center";
+  for (let i = 0; i <= 6; i++) { const k = kmin + (kmax - kmin) * i / 6;
+    g.fillText(k.toFixed(0), x(k), H - 8); }
+  const S = smile.spot;
+  if (S >= kmin && S <= kmax) {
+    g.strokeStyle = "#58a6ff88"; g.setLineDash([4, 3]);
+    g.beginPath(); g.moveTo(x(S), PAD.t); g.lineTo(x(S), H - PAD.b); g.stroke(); g.setLineDash([]);
+    g.fillStyle = "#58a6ff"; g.textAlign = "left"; g.fillText("spot " + S, x(S) + 4, PAD.t + 10);
+  }
+  let clipped = 0;
+  for (const e of series) {
+    const col = smileColor(e.id), pts = e.points;
+    // Break only at the put/call switch or where the server flags a filtered
+    // listed strike (p[3]); the strike grid itself widens ($1 -> $5) and is
+    // not a gap.
+    const brkAt = i => i === 0 || pts[i][2] !== pts[i - 1][2] || pts[i][3] === 1;
+    // Lines use TRUE coordinates inside a clip rectangle, so a zoomed curve is
+    // cut at the edge where it really crosses it (clamping the points instead
+    // bent the curve toward them). Only the edge markers are clamped.
+    g.save(); g.beginPath();
+    g.rect(PAD.l, PAD.t, W - PAD.l - PAD.r, H - PAD.t - PAD.b); g.clip();
+    g.strokeStyle = col; g.lineWidth = 1.5; g.beginPath();
+    pts.forEach((p, i) => brkAt(i) ? g.moveTo(x(p[0]), y(p[1])) : g.lineTo(x(p[0]), y(p[1])));
+    g.stroke(); g.restore(); g.lineWidth = 1; g.fillStyle = col;
+    for (const p of pts) {
+      const out = y(p[1]) < PAD.t || y(p[1]) > H - PAD.b;
+      if (out) { clipped++; g.beginPath();                 // clipped: a triangle at the edge
+        const yy = yc(p[1]), up = y(p[1]) < PAD.t;
+        g.moveTo(x(p[0]) - 3, yy + (up ? 5 : -5)); g.lineTo(x(p[0]) + 3, yy + (up ? 5 : -5));
+        g.lineTo(x(p[0]), yy); g.fill(); }
+      else {                                  // dots: sparse curves, and ISOLATED points
+        const i = pts.indexOf(p);               // (a lone point has no line to show it)
+        const lone = brkAt(i) && (i === pts.length - 1 || brkAt(i + 1));
+        if (pts.length < 40 || lone) { g.beginPath(); g.arc(x(p[0]), y(p[1]), 2, 0, 7); g.fill(); }
+      }
+    }
+  }
+  const mixed = latest.session_date && etDateOf(latest.feed && latest.feed.newest_trade_time) < latest.session_date;
+  note.innerHTML = `snapshot ${tzStamp(latest.feed && latest.feed.received_at)} · ` +
+    series.map(e => `<span style="color:${smileColor(e.id)}">${smileLabel(e)}</span> ${e.retained} kept`).join(" · ") +
+    (clipped ? ` · <span class="warn">${clipped} points outside the zoom (▲▼) — "full range" shows them</span>` : "") +
+    (empty.length ? ` · <span class="warn">${empty.map(e => smileLabel(e)).join(", ")}: 0 kept</span>` : "") +
+    (mixed ? ` · <span class="warn">mixed-age: this is the previous session's IV</span>` : "") +
+    ex(howto("implied volatility by strike for each selected expiry, out-of-the-money side only: puts below spot, calls above. " +
+             "Higher points mean higher model IV at those strikes; for a like-for-like put-versus-call comparison, use the 25Δ skew strip in the term-structure panel.") +
+      `kept = two-sided quote, spread ≤ ${((smile.rule && smile.rule.max_rel_spread) || 0.2) * 100}% of mid, within ±20% of spot; gaps are filtered strikes.`);
+  return {PAD, W, H, x, y, series, kmin, kmax, lo, hi};
+}
+
+function smileDescribe(ctx, mx, my) {
+  let best = null, bd = 1e9;
+  for (const e of ctx.series) for (const p of e.points) {
+    const d = Math.hypot(ctx.x(p[0]) - mx, Math.max(ctx.PAD.t, Math.min(ctx.H - ctx.PAD.b, ctx.y(p[1]))) - my);
+    if (d < bd) { bd = d; best = [e, p]; }
+  }
+  if (!best || bd > 18) return null;
+  const [e, p] = best;
+  return `${e.expiry}${e.settle ? " " + e.settle : ""} (${e.dte}d)\nstrike ${p[0]} ${p[2] === "P" ? "put" : "call"}\nIV ${(p[1] * 100).toFixed(2)}%`;
+}
+
+let historyKey = null, historyBusy = false;   // poll the loaded trend belongs to
+let historyLag = null;                        // median data lag of the session (s), from the server
+async function loadHistory() {
+  if (historyBusy) return;
+  historyBusy = true;
+  // A request that HANGS (rather than failing) would otherwise never reach
+  // `finally`, leave historyBusy set, and stop every future retry. The abort
+  // covers reading the body (r.json()) too.
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 15000);
+  try { const r = await fetch(api("/api/history"), {signal: ctl.signal});
+        if (!r.ok) return;
+        const h = await r.json();
+        if (!latest || h.poll_key !== latest.poll_key) return;
+        history = h.session_date === latest.session_date ? (h.series || []) : [];
+        historyLag = h.session_date === latest.session_date ? h.median_lag_s : null;
+        renderHeader();                           // the header's lag-based tag reads it
+        historyKey = h.poll_key;
+        drawAll(); }
+  catch(e) {}
+  finally { clearTimeout(timer); historyBusy = false; }
+}
+// Retry while the trend is missing or behind the poll on screen. Loading only
+// on a new poll meant ONE failed request left the chart empty until the next
+// poll -- after Friday's close, all weekend.
+setInterval(() => { if (latest && historyKey !== latest.poll_key) loadHistory(); }, 10000);
+
+const es = new EventSource(api("/api/stream"));
+es.onmessage = e => { streamDown = false; render(JSON.parse(e.data)); };
+es.onopen = () => { streamDown = false; renderFeed(); };
+es.onerror = () => {
+  streamDown = true;
+  if (latest) renderFeed();
+  else $("feed").innerHTML = '<span class="warn">stream disconnected — retrying</span>';
+};
+// No bootstrap fetch of /api/snapshot: the stream sends the current snapshot
+// as soon as it connects, and a slower one-off fetch could land AFTER a newer
+// stream update and overwrite it with older data. History loads per poll
+// from render().
+(function initGexMode() {
+  const el = $("gexmodectl");
+  const draw = () => {
+    el.innerHTML = "";
+    for (const [id, name, tip] of [["net", "net per strike", "calls minus puts at each strike -- what the header, GEX ratio and tracks use"],
+                                  ["split", "calls & puts", "call gamma right, put gamma left, separately"]]) {
+      const b = document.createElement("button");
+      b.textContent = name; b.title = tip; b.className = gexMode === id ? "on" : "";
+      b.onclick = () => { gexMode = id; try { localStorage.setItem("gex.gexmode", id); } catch (e) {} draw(); drawAll(); };
+      el.appendChild(b);
+    }
+    $("gextitle").innerHTML = gexMode === "net"
+      ? `Gamma exposure by strike · net<span class="ex"> per strike (calls − puts): positive right, negative left</span>`
+      : `Gamma exposure by strike · calls &amp; puts<span class="ex">: calls right, puts left</span>`;
+  };
+  draw();
+})();
+
+(function initExplain() {
+  const b = $("explainbtn");
+  const apply = () => {
+    document.body.classList.toggle("explain", explain);
+    b.className = "stat" + (explain ? " on" : "");
+    b.textContent = explain ? "explanations: on" : "explanations: off";
+  };
+  b.onclick = () => {
+    explain = !explain;
+    try { localStorage.setItem("gex.explain", explain ? "1" : "0"); } catch (e) {}
+    apply(); drawAll();             // notes change height, so canvases may resize
+  };
+  apply();
+})();
+
+(function initUnitMenu() {
+  const sel = $("unitsel");
+  for (const [id, name] of UNIT_CHOICES) {
+    const o = document.createElement("option");
+    o.value = id; o.textContent = name; sel.appendChild(o);
+  }
+  sel.value = units;
+  sel.onchange = () => {
+    units = sel.value;
+    try { localStorage.setItem("gex.units", units); } catch (e) {}
+    renderHeader(); drawAll();          // header, notes, tooltips, trend
+  };
+})();
+
+(function initTzMenu() {
+  const sel = $("tzsel");
+  for (const [id, name] of TZ_CHOICES) {
+    const o = document.createElement("option");
+    o.value = id;
+    o.textContent = name;
+    o.title = id === "local" ? LOCAL_TZ : id;
+    sel.appendChild(o);
+  }
+  sel.value = displayTZ;
+  sel.title = `time zone for every time on this page (this computer: ${LOCAL_TZ})`;
+  sel.onchange = () => {
+    displayTZ = sel.value;
+    try { localStorage.setItem("gex.tz", displayTZ); } catch (e) {}
+    tick(); renderFeed(); renderHealth(); drawAll();     // every time on the page
+  };
+})();
+
+let lastEnded = null;
+function tick() {
+  $("clock").textContent = tzTime(new Date().toISOString()) + " " + tzLabel();
+  renderPostClose();              // clock-driven: the banner appears at the scheduled close
+  // ...and so, once, does everything else that reads either clock (the
+  // expiring series settles before the session close for SPX).
+  const ended = `${expiringEnded()}|${sessionEnded()}`;
+  if (lastEnded !== null && ended !== lastEnded) { renderSmileControls(); drawAll(); }  // selection kept
+  lastEnded = ended;
+  renderFeed();                   // keeps every age on the feed line live
+  renderHealth();
+}
+loadStatus(); setInterval(loadStatus, 30000);
+tick(); setInterval(tick, 1000);
+addEventListener("resize", drawAll);
+</script>
