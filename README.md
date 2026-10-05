@@ -91,34 +91,8 @@ not every snapshot in the archive, and SPX coverage is on the roadmap.
   breaking the code (a wrong key, an off-by-one window, a skipped filter)
   has to make them fail, and it does.
 
-## Engineering notes
 
-A few problems that shaped the design:
-
-- **The feed's timestamp is not data age.** Payloads look ~45 s fresh while
-  the newest trade can be the previous session's close. The page shows the
-  newest *trade* time and flags "mixed-age" snapshots, which carry the
-  previous session's greeks during the first ~15 minutes of each day.
-- **Schema evolution without breaking history.** The store went through four
-  versions (adding per-side IV and quotes, then per-contract greeks, then the
-  option root) while the archive kept growing. Readers use an explicit schema
-  and read only columns a file has.
-- **SPX lists two products on the same date.** AM-settled SPX and PM-settled
-  SPXW share strikes on monthly expiries. Keyed by (strike, expiry) alone,
-  ~3,000 contract sides per snapshot would have collided and lost their
-  quotes. They are now separate rows, separate IV curves and separate OI
-  series. On settlement morning the AM leg is dropped from every panel by
-  one read-time rule, and the raw data is kept.
-- **Resilience against a source you can't control.** Exponential backoff with
-  separate handling for timeouts, HTTP refusals (Retry-After honoured) and
-  "valid but unusable" payloads (e.g. the source's daily greeks-zeroed
-  handover, refused rather than stored as a flat market), plus a stall alert
-  written to the log.
-- **Lossless transitions.** Around a schema change, the collector can keep the
-  exact bytes of every response for a window, so a capture rule found wrong
-  later can be replayed rather than lost.
-
-## Limits, stated plainly
+## Limits
 
 - The source is a **delayed** feed (~16 minutes). This is a low-latency
   *display* of delayed data, never "real-time".
@@ -129,17 +103,6 @@ A few problems that shaped the design:
 - Net GEX is a difference of two large sums, so it is sensitive to small
   model differences; the per-strike profile is the more robust view.
 
-## Data and terms
-
-The included client reads Cboe's public delayed-quotes JSON. **Cboe's website
-terms prohibit automated extraction of its delayed quote data**, and the data
-is licensed for personal, non-commercial use only and may not be
-redistributed. This repository includes the client so the system can be read
-end to end; it does not grant, and does not claim, any right to use Cboe's
-data. Before running it, use a data source you are licensed to access
-automatically. No collected datasets are included here, and the dashboard
-refuses to bind to anything but localhost. The open-interest check uses OCC's
-public series search.
 
 ## Running it
 
@@ -184,15 +147,3 @@ from the original private repository's history, which is not included here.
 Treat them as the project's own evidence rather than something reproducible
 from this repository alone.
 
-## Roadmap
-
-- SPX coverage in the daily accuracy report
-- GEX-derived reference levels (call/put walls, max-gamma strikes and a
-  stability-gated, clearly-labelled modelled zero-gamma level) converted to
-  ES futures prices, with a TradingView indicator for display
-- Multi-day heatmaps as history accumulates
-
-## Stack
-
-Python 3.10 (stdlib HTTP server, `requests`, `pyarrow`), Parquet/Zstd,
-vanilla JavaScript and Canvas, Server-Sent Events, systemd on Ubuntu (ARM).
